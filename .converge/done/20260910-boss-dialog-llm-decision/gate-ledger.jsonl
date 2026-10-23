@@ -1,0 +1,4 @@
+{"event": "reserved", "reservation_id": "92f39e97ace5", "ts": "2026-09-10T04:35:31.486958+00:00", "target_round": 1, "target_role": "outer-reviewer", "consumes": "outer", "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0}, "ceilings": {"outer": 8, "blind": 3, "ultraverge": 3, "total": 63}, "extension_id": null, "tier": "auditable-only"}
+{"event": "spawn_succeeded", "reservation_id": "92f39e97ace5", "ts": "2026-09-10T04:41:51.147782+00:00", "instance_id": "agent-0"}
+{"event": "reserved", "reservation_id": "dcff89fe552c", "ts": "2026-09-10T04:44:34.996801+00:00", "target_round": null, "target_role": "executor", "consumes": "none", "counts_before": {"outer": 1, "blind": 0, "ultraverge": 0, "total": 1}, "ceilings": {"outer": 8, "blind": 3, "ultraverge": 3, "total": 63}, "extension_id": null, "tier": "auditable-only"}
+{"event": "spawn_succeeded", "reservation_id": "dcff89fe552c", "ts": "2026-09-10T04:48:58.432150+00:00", "instance_id": "agent-1"}

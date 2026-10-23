@@ -1,0 +1,70 @@
+server:
+  port: 8081
+  compression:
+    enabled: true
+    mime-types: application/json,text/html,text/plain,application/javascript,text/css
+    min-response-size: 2048
+
+spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - classpath:application-gpt.yml
+      - classpath:application-auth.yml
+      - classpath:application-dict.yml
+  application:
+    name: npe-get-jobs
+  web:
+    resources:
+      static-locations: classpath:/dist/
+  datasource:
+    url: 'jdbc:sqlite:${user.home}/getjobs/npe_get_jobs.db?journal_mode=WAL&synchronous=NORMAL&cache_size=-64000&foreign_keys=ON&busy_timeout=30000'
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  sql:
+    init:
+      mode: never
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.community.dialect.SQLiteDialect
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+  mustache:
+    check-template-location: false
+
+logging:
+  level:
+    root: INFO
+    getjobs.modules.recruitment: INFO
+    getjobs.infrastructure.ai: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+async:
+  core-pool-size: 4
+  max-pool-size: 8
+  queue-capacity: 100
+  keep-alive-seconds: 60
+
+proxy:
+  host: ${HTTP_PROXY_HOST:}
+  port: ${HTTP_PROXY_PORT:0}
+
+playwright:
+  enabled: false
+
+recruitment:
+  browser:
+    enabled: true
+    auto-start: true
+    base-url: ${RECRUITMENT_BROWSER_BASE_URL:http://127.0.0.1:17321}
+    working-directory: node-services/recruitment-browser

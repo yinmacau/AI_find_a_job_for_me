@@ -1,0 +1,63 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "批量投递 BOSS 岗位",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "run_contact_sender.py",
+        "--jobs-file", "resume_matched_jobs.json",
+        "--greetings-file", "resume_greeting_messages.json"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "简历与岗位 AI 匹配",
+      "type": "shell",
+      "command": "python",
+      "args": ["resume_matcher.py"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "BOSS 岗位发现 + 简历匹配",
+      "type": "shell",
+      "command": "python",
+      "args": ["job_discovery.py", "--match-resume"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

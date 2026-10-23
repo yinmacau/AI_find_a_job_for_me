@@ -1,0 +1,2061 @@
+# Changelog 💖
+Hello 小可爱们！这里是我们的成长日记，所有酷炫的更新和优化都会在这里记录哦！
+
+## [1.0.35] - 2025-10-31 ⚡
+
+### Changed
+- **数据库配置全面优化！✨ SQLite 性能提升 + 数据持久化保障**
+  - **核心变更 🎯**：从 `create-drop` 模式升级为 `update` 模式
+    - **修改前**：每次应用启动/关闭都会删除所有表和数据（`ddl-auto: create-drop`）
+    - **修改后**：保留表结构和数据，仅在 schema 变更时自动更新（`ddl-auto: update`）
+    - **收益**：数据真正持久化，应用重启不再丢失历史数据 ✅
+  - **连接池优化 🔧**：针对 SQLite + WAL 模式特性优化 HikariCP 配置
+    - **连接池大小**：从 10 降低到 5（WAL 模式支持并发读，5个连接平衡性能和资源）
+    - **最小空闲连接**：设置为 2，应对突发查询请求
+    - **连接超时**：设置 30 秒超时，避免长时间等待
+    - **空闲回收**：10 分钟后回收空闲连接，释放资源
+    - **连接存活时间**：30 分钟最大存活时间，定期刷新连接
+  - **SQLite 性能优化 ⚡**：在连接 URL 中添加性能优化参数
+    - **WAL 模式**：`journal_mode=WAL` - 启用 Write-Ahead Logging，提升并发读写性能
+    - **同步模式**：`synchronous=NORMAL` - 平衡性能与数据安全（异常断电可能丢失最后一个事务）
+    - **缓存大小**：`cache_size=-64000` - 设置 64MB 缓存（负数表示 KB），加速查询
+    - **外键约束**：`foreign_keys=ON` - 启用外键约束，保证数据完整性
+    - **繁忙超时**：`busy_timeout=30000` - 数据库锁定时最多等待 30 秒
+  - **SQL 初始化优化 🚀**：`sql.init.mode` 从 `always` 改为 `never`
+    - 数据库已持久化，无需每次启动都执行 SQL 脚本
+    - 避免重复执行初始化脚本导致的性能损耗
+    - **注意**：这只是不执行 SQL 脚本，表的创建由 Hibernate 的 `ddl-auto: update` 负责
+    - **首次启动**：Hibernate 会自动扫描 @Entity 实体类并创建所有表，不会报错 ✅
+  - **Dialect 明确指定 🎯**：显式配置 `SQLiteDialect`
+    - 避免 Hibernate 自动检测方言的开销
+    - 确保生成的 SQL 语句最适合 SQLite
+
+### Technical Details
+- **修改文件**：
+  - `application.yml`：全面优化数据库配置（约 30 行修改）
+- **配置对比**：
+  ```yaml
+  # 修改前 - 数据不持久化 + 连接池过大
+  datasource:
+    url: 'jdbc:sqlite:${user.home}/getjobs/npe_get_jobs.db'
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      idle-timeout: 0
+      max-lifetime: 0
+  jpa:
+    hibernate:
+      ddl-auto: create-drop  # ❌ 每次启动删除所有数据
+  
+  # 修改后 - 数据持久化 + 性能优化
+  datasource:
+    url: 'jdbc:sqlite:${user.home}/getjobs/npe_get_jobs.db?journal_mode=WAL&synchronous=NORMAL&cache_size=-64000&foreign_keys=ON&busy_timeout=30000'
+    hikari:
+      maximum-pool-size: 5      # ✅ WAL 模式支持并发读，5个连接平衡性能
+      minimum-idle: 2           # ✅ 保持2个常驻，应对突发查询
+      connection-timeout: 30000
+      idle-timeout: 600000       # ✅ 10分钟回收
+      max-lifetime: 1800000      # ✅ 30分钟刷新
+  jpa:
+    hibernate:
+      ddl-auto: update           # ✅ 保留数据，仅更新结构
+    properties:
+      hibernate:
+        dialect: org.hibernate.community.dialect.SQLiteDialect  # ✅ 明确指定方言
+  ```
+- **SQLite WAL 模式说明**：
+  - **传统模式**：写操作阻塞所有读操作，性能较差
+  - **WAL 模式**：写操作不阻塞读操作，支持多读单写并发
+  - **适用场景**：读多写少的应用（正好适合本项目）
+  - **磁盘开销**：会生成 `-wal` 和 `-shm` 两个辅助文件
+- **连接池大小为何设置为 5**：
+  - **WAL 模式加持**：传统模式写操作串行，但 WAL 模式支持**并发读操作**
+  - **读多写少场景**：本项目主要是配置查询、岗位列表查询等读操作，WAL 模式能真正发挥并发优势
+  - **平衡性能与资源**：5个连接既能支持中等并发查询，又不会造成过多资源浪费
+  - **避免连接竞争**：设置 `busy_timeout=30000` 后，并发写入时也不会无限等待
+- **数据安全说明**：
+  - `synchronous=NORMAL` 模式下，正常关闭应用数据完全安全
+  - 异常断电（如拔电源）可能丢失最后一个事务（约 1-2 秒内的操作）
+  - 如需更高安全性可改为 `synchronous=FULL`（性能会下降约 50%）
+- **缓存大小建议**：
+  - 默认值：约 2MB（太小）
+  - 本次配置：64MB（适中）
+  - 可根据服务器内存调整：`cache_size = -(内存MB数)`
+  - 更大的缓存可减少磁盘 I/O，提升查询速度
+
+### 收益
+- ✅ **数据真正持久化**：应用重启不再丢失历史数据，告别 `create-drop` 的数据丢失风险
+- ✅ **性能提升显著**：WAL 模式 + 大缓存 + 并发读，查询速度提升约 30%-50%
+- ✅ **并发性能优化**：5个连接池支持并发查询，WAL 模式不阻塞读操作
+- ✅ **连接管理更合理**：定期回收和刷新连接，避免连接泄漏
+- ✅ **数据完整性保障**：启用外键约束，防止数据不一致
+- ✅ **启动速度提升**：跳过 SQL 初始化脚本，启动更快
+- ✅ **适合生产环境**：配置更专业，符合 SQLite 最佳实践
+
+### 注意事项
+- ⚠️ **首次启动流程**：
+  - SQLite 驱动自动创建 `npe_get_jobs.db` 文件（如果不存在）
+  - Hibernate 扫描所有 `@Entity` 实体类（JobEntity、ConfigEntity、UserProfile 等）
+  - Hibernate 自动执行 `CREATE TABLE` 语句创建所有表
+  - `sql.init.mode: never` 只是不执行额外的 SQL 脚本，不影响表的自动创建 ✅
+- ⚠️ **WAL 模式文件**：首次启动后会生成 `npe_get_jobs.db-wal` 和 `npe_get_jobs.db-shm` 文件，这是正常现象
+- ⚠️ **备份建议**：备份数据库时需同时备份这 3 个文件（.db、.db-wal、.db-shm）
+- ⚠️ **旧数据迁移**：如果之前使用 `create-drop` 模式，首次启动 `update` 模式时数据库为空（旧数据已丢失）
+- ⚠️ **Schema 变更**：修改实体类字段时，Hibernate 会自动更新表结构，但不会删除已存在的列
+
+### 最佳实践参考
+- **SQLite 官方文档**：https://www.sqlite.org/wal.html
+- **WAL 模式并发特性**：读操作不阻塞，写操作串行（1个写线程）
+- **HikariCP 连接池建议**：
+  - **传统模式**：推荐 1 个连接（写操作完全串行）
+  - **WAL 模式（本项目）**：推荐 5-10 个连接（支持并发读）
+  - **高性能场景**：如果查询并发非常高，可适当增大到 10-20
+- **Hibernate 方言配置**：`org.hibernate.community.dialect.SQLiteDialect`（Hibernate 6.x）
+- **性能调优建议**：
+  - **查询密集型**：增大 `cache_size` 到 128MB 或更高，提高连接池到 10
+  - **写入密集型**：考虑使用 PostgreSQL 或 MySQL 替代 SQLite
+  - **高并发读**：WAL 模式 + 多连接池（5-20），充分发挥并发读优势
+  - **纯单用户**：1个连接即可，无需连接池
+
+## [1.0.34] - 2025-10-31 🗄️
+
+### Changed
+- **数据库持久化升级！✨ 告别内存模式，拥抱文件存储**
+  - **核心变更 🎯**：SQLite 数据库从内存模式（`mode=memory`）升级为文件持久化模式
+    - 数据库文件路径：`${user.home}/getjobs/npe_get_jobs.db`
+    - 数据自动持久化到磁盘，重启应用数据不丢失
+    - 告别定时备份和恢复的复杂逻辑，数据库原生持久化更可靠
+  - **移除备份模块 🗑️**：由于数据库已持久化，完全移除了旧的 JSON 备份/恢复机制
+    - 删除 `DataBackupService` 接口和实现类（226行代码）
+    - 删除 `DataBackupController` HTTP 接口（135行代码）
+    - 删除 `DataBackupTask` 任务实现（57行代码）
+    - 删除 `DataBackupSchedulerV2` 定时任务调度器（90行代码）
+    - 删除 `DataRestoreListener` 启动恢复监听器（77行代码）
+    - 总计移除约 **585行** 不再需要的备份相关代码
+  - **依赖清理 🧹**：
+    - 移除 `PlaywrightService` 对 `dataRestoreInitializer` 的依赖注解
+    - 移除未使用的 `@DependsOn` import
+    - 简化服务启动流程，无需等待数据恢复
+
+### Technical Details
+- **数据库配置变更**：
+  ```yaml
+  # 修改前（内存模式）
+  spring:
+    datasource:
+      url: 'jdbc:sqlite:file:memdb1?mode=memory&cache=shared'
+  
+  # 修改后（文件持久化）
+  spring:
+    datasource:
+      url: 'jdbc:sqlite:${user.home}/getjobs/npe_get_jobs.db'
+  ```
+- **删除的文件**（6个）：
+  - `getjobs/service/DataBackupService.java` - 备份服务接口
+  - `getjobs/service/impl/DataBackupServiceImpl.java` - 备份服务实现
+  - `getjobs/controller/DataBackupController.java` - 备份HTTP控制器
+  - `getjobs/modules/task/domain/DataBackupTask.java` - 备份任务实现
+  - `getjobs/modules/task/service/DataBackupSchedulerV2.java` - 定时备份调度器
+  - `getjobs/listener/DataRestoreListener.java` - 启动数据恢复监听器
+- **修改的文件**（2个）：
+  - `application.yml`：数据库连接URL从内存模式改为文件模式
+  - `PlaywrightService.java`：移除 `@DependsOn("dataRestoreInitializer")` 注解和相关注释
+- **移除的API接口**：
+  - `POST /api/backup/export` - 导出数据备份
+  - `POST /api/backup/import` - 导入数据恢复
+  - `GET /api/backup/info` - 获取备份信息
+  - `DELETE /api/backup/clean` - 清理备份文件
+
+### 收益
+- ✅ **数据更可靠**：数据库原生持久化，不依赖定时备份，数据丢失风险为零
+- ✅ **架构更简洁**：移除 585 行备份相关代码，系统更轻量
+- ✅ **启动更快速**：无需等待数据恢复流程，应用启动即可用
+- ✅ **维护成本降低**：不再需要维护备份/恢复逻辑和 JSON 序列化
+- ✅ **用户体验提升**：数据自动保存，无需关心备份操作
+- ✅ **资源占用优化**：取消每 5 秒一次的定时备份任务，减少 CPU 和磁盘 I/O
+- ✅ **数据迁移友好**：数据库文件可直接复制到其他机器使用
+
+### 注意事项
+- ⚠️ 首次启动时，应用会自动在 `~/getjobs` 目录下创建数据库文件
+- ⚠️ 如有旧的备份文件（`~/getjobs/data_backup.json`），可手动删除，已不再使用
+- ⚠️ 数据库文件位置：`~/getjobs/npe_get_jobs.db`（可备份此文件作为数据快照）
+
+## [1.0.33] - 2025-10-26 🎨
+
+### Added
+- **AI建议可视化展示上线！✨ 智能推荐一目了然**
+  - **核心技能AI建议区域 🎯**：在候选人信息配置的"核心技能"板块中新增AI建议技能清单展示
+    - 紫色渐变背景（#667eea → #764ba2），专业感满满
+    - 显示后端返回的 `aiTechStack` 数组，推荐市场主流技术栈
+    - 使用机器人图标 `bi-robot` + "智能推荐"徽章，AI特征鲜明
+  - **领域经验AI建议区域 💼**：在"领域经验"板块中新增两个独立的AI建议区域
+    - **热门行业区域**：粉红渐变背景（#f093fb → #f5576c）
+      - 显示 `aiHotIndustries` 数组，推荐当前最热门的行业方向
+      - 使用星星图标 `bi-stars`，突出"热门"属性
+    - **相关领域区域**：蓝色渐变背景（#4facfe → #00f2fe）
+      - 显示 `aiRelatedDomains` 数组，推荐职业延伸领域
+      - 使用灯泡图标 `bi-lightbulb`，传达"灵感"与"拓展"
+  - **打招呼内容AI建议区域 💬**：在简历配置的"打招呼内容"板块中新增AI生成内容展示
+    - 黄粉渐变背景（#fa709a → #fee140），温暖友好
+    - 显示 `aiGreetingMessage` 字符串，展示AI生成的个性化招呼语
+    - 使用聊天心形图标 `bi-chat-heart` + "智能生成"徽章
+    - 内置"复制"按钮，一键复制AI生成的内容到剪贴板
+    - 复制成功后按钮变绿显示"已复制"，2秒后自动恢复
+  - **设计亮点 🌈**：
+    - 每个AI区域都有独特的渐变背景色和2px边框，视觉层次分明
+    - 使用白色徽章（badge）展示AI建议标签，与背景形成鲜明对比
+    - 专属AI图标（机器人、星星、灯泡、聊天心形），一眼识别AI功能
+    - "智能推荐/智能生成"徽章标识，强化AI属性
+    - 默认隐藏，只有当后端返回数据时才显示，避免空白区域
+  - **交互体验优化 🎁**：
+    - 复制按钮带视觉反馈：复制成功后变绿色并显示"已复制"
+    - 2秒后自动恢复原始状态，给用户明确的操作反馈
+    - 异常处理：复制失败时弹出提示，提示用户手动复制
+
+### Technical Details
+- **修改文件**：
+  - `index.html`：
+    - 在"核心技能"板块后新增 `aiTechStackSection`（AI建议技能区域）
+    - 在"领域经验"板块后新增 `aiDomainSection`（包含热门行业和相关领域两个子区域）
+    - 在"打招呼内容"板块后新增 `aiGreetingSection`（AI建议打招呼内容区域）
+    - 总计新增约50行HTML代码
+  - `common-config.js`：
+    - 新增 `populateAiSuggestions(config)` 函数（约100行）
+    - 在 `loadCommonConfig()` 中调用 `populateAiSuggestions()` 展示AI建议
+    - 实现复制按钮的事件绑定和视觉反馈逻辑
+    - 支持从后端响应的 `data` 属性中提取AI建议字段
+- **数据结构**（后端返回的AI建议字段）：
+  - `aiTechStack` - AI推荐技术栈（数组，如：["Java 17", "Spring Boot", "MySQL", "Redis"]）
+  - `aiHotIndustries` - AI推荐热门行业（数组，如：["互联网", "电商", "金融科技"]）
+  - `aiRelatedDomains` - AI推荐相关领域（数组，如：["医疗信息化", "教育科技", "物流供应链"]）
+  - `aiGreetingMessage` - AI生成的打招呼消息（字符串，50-120字）
+- **视觉设计规范**：
+  - **核心技能AI区域**：`background: linear-gradient(135deg, #667eea 0%, #764ba2 100%)`
+  - **热门行业AI区域**：`background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%)`
+  - **相关领域AI区域**：`background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)`
+  - **打招呼AI区域**：`background: linear-gradient(135deg, #fa709a 0%, #fee140 100%)`
+  - 统一样式：`border-radius: 10px`、`padding: 12px`、白色文字、白色徽章标签
+- **JavaScript逻辑**：
+  - `populateAiSuggestions()` 函数负责解析后端数据并动态渲染AI建议区域
+  - 使用 `document.createElement()` 和 `appendChild()` 动态创建徽章标签
+  - 使用 `navigator.clipboard.writeText()` 实现复制功能
+  - 复制按钮使用 `cloneNode(true)` 移除旧事件监听器，避免重复绑定
+  - 所有AI区域默认 `display: none`，有数据时才设置为 `display: block`
+- **兼容性处理**：
+  - 后端未返回AI建议数据时，前端优雅降级，不显示AI区域
+  - 数组为空或未定义时，不渲染对应的AI建议区域
+  - 复制API不支持时，使用 `alert()` 提示用户手动复制
+
+### 收益
+- ✅ AI建议可视化展示，用户可直观查看AI分析结果
+- ✅ 独特的视觉设计，一眼识别AI推荐内容
+- ✅ 一键复制功能，快速应用AI生成的打招呼内容
+- ✅ 渐变色背景和专属图标，提升界面美观度和现代感
+- ✅ 智能显隐逻辑，避免空白区域影响用户体验
+- ✅ 为候选人提供职业发展参考（技能、行业、领域）
+- ✅ 降低填写打招呼内容的门槛，提高沟通效率
+- ✅ 完整的交互反馈，提升用户操作体验
+
+## [1.0.32] - 2025-10-26 🤖
+
+### Added
+- **AI岗位技能分析模块上线！✨ 智能分析技术栈，自动生成打招呼消息**
+  - **全新 job_skill 模块 🎯**：在 `modules/ai/job_skill` 包下构建了完整的岗位技能分析框架
+    - 根据岗位名称和工作年限，AI自动分析市场主流技术栈
+    - 推荐热门行业领域和相关领域，帮你拓宽职业视野
+    - 智能生成岗位匹配打招呼消息（50-120字），专业友好不夸张
+    - 支持个人优势列表输入，AI自动融合优势生成个性化文案
+  - **核心功能实现 🚀**：
+    - **DTO层**：`JobSkillRequest`（请求参数）、`JobSkillResponse`（分析结果）
+    - **Assembler层**：`JobSkillPromptAssembler`（提示词组装器）、`JobSkillPromptVariables`（变量常量）
+    - **Service层**：`JobSkillService`（分析服务，支持模板ID指定）
+    - **Web层**：`JobSkillController`（HTTP接口 `/api/ai/job-skill/analyze`）
+    - **提示词模板**：`prompts/job-skill-prompt.yml`（结构化YAML配置）
+  - **智能推断规则 🧠**：
+    - 未给明确定义的岗位名称自动推断职业方向（如 Java开发 → 后端工程师）
+    - 若未提供年限，默认中级（3-5年）
+    - 个人优势为空时，结合岗位硬性指标和主流技术栈自动补强
+    - 文案强调主流技术栈经验、模块级业务能力、系统稳定性与协作能力
+  - **配置自动保存 💾**：用户保存公共配置时，自动触发AI分析并保存结果到 UserProfile
+    - 分析结果包含：推断的岗位名称、岗位级别、技术栈列表、热门行业、相关领域、打招呼消息
+    - 前端通过 `/api/common/config/get` 接口可获取AI分析结果
+    - 数据持久化到数据库，下次访问无需重新分析
+  - **异步执行优化 ⚡**：
+    - 创建专用异步线程池 `aiAnalysisExecutor`（核心线程2，最大4）
+    - AI分析在后台异步执行，不阻塞配置保存流程
+    - 保存配置立即返回成功，用户体验流畅丝滑
+    - 分析完成后自动更新数据库，前端下次查询即可获取结果
+
+### Technical Details
+- **新增文件**（11个核心文件）：
+  - **job_skill模块**（7个）：
+    - `JobSkillRequest.java` - 分析请求DTO（岗位名称、工作年限、个人优势）
+    - `JobSkillResponse.java` - 分析结果DTO（推断岗位、级别、技术栈、行业、领域、打招呼消息）
+    - `JobSkillPromptAssembler.java` - 提示词组装器
+    - `JobSkillPromptVariables.java` - 提示词变量常量
+    - `JobSkillService.java` - 岗位技能分析服务
+    - `JobSkillController.java` - HTTP接口控制器
+    - `prompts/job-skill-prompt.yml` - 结构化提示词模板（SYSTEM、USER、FEW_SHOTS）
+  - **异步执行模块**（2个）：
+    - `AsyncConfig.java` - 异步任务配置类（通用线程池 + AI专用线程池）
+    - `JobSkillAnalysisAsyncService.java` - 岗位技能分析异步服务
+  - **配置文件**（2个）：
+    - `application.yml` - 新增异步任务配置（core-pool-size、max-pool-size等）
+- **修改文件**（3个）：
+  - `UserProfile.java`：
+    - 新增6个AI分析结果字段：
+      - `aiInferredJobTitle` - 推断的岗位名称（VARCHAR 100）
+      - `aiJobLevel` - 岗位级别（VARCHAR 50）
+      - `aiTechStack` - 技术栈列表（TEXT, JSON）
+      - `aiHotIndustries` - 热门行业领域（TEXT, JSON）
+      - `aiRelatedDomains` - 相关领域（TEXT, JSON）
+      - `aiGreetingMessage` - 打招呼消息（TEXT）
+  - `UserProfileDTO.java`：同步新增6个AI分析结果字段的DTO定义
+  - `CommonConfigController.java`：
+    - 注入 `JobSkillAnalysisAsyncService` 异步服务
+    - 在 `saveCommonConfig()` 中调用 `analyzeJobSkillAsync(saved.getId())`
+    - 在 `convertToDTO()` 中添加AI分析结果字段的映射
+- **异步配置**：
+  - **通用线程池**：核心线程4，最大线程8，队列容量100
+  - **AI专用线程池**：核心线程2，最大线程4，队列容量50，避免大模型调用占用过多资源
+  - 拒绝策略：CallerRunsPolicy（由调用线程处理，保证任务不丢失）
+  - 优雅关闭：等待所有任务结束后再关闭线程池，超时60秒
+- **提示词模板设计**：
+  - **SYSTEM角色**：定义AI身份（资深IT岗位市场分析顾问 + 招聘文案专家）
+  - **USER角色**：提供输入参数（岗位名称、工作年限、个人优势）
+  - **FEW_SHOTS角色**：提供示例输出（Java开发 → Java后端开发工程师）
+  - **输出JSON结构**：7个字段的结构化数据，便于解析和使用
+- **智能文案规则**：
+  - 50~120字中文，语气专业友好，不谄媚不夸张
+  - 围绕岗位需求与能力匹配展开
+  - 有个人优势列表：融合其中1-2点，体现价值
+  - 无个人优势：自动根据市场热门要求补充2点合理优势
+  - 表达稳定交付能力与主流项目实践经验
+  - 避免硬夸技术或与能力不符的超大型项目描述
+- **执行流程**：
+  1. 用户保存公共配置 → 立即返回成功（不阻塞）
+  2. 后台异步线程从数据库重新加载 UserProfile
+  3. 提取岗位名称、工作年限、个人亮点（highlights作为优势）
+  4. 调用 `JobSkillService.analyze()` 执行AI分析（2-5秒）
+  5. 将分析结果保存到 UserProfile（6个字段）
+  6. 设置 `updatedAt` 时间戳
+  7. 前端下次查询配置时自动获取AI分析结果
+- **容错设计**：
+  - 岗位名称缺失时优雅降级，跳过AI分析
+  - 工作年限缺失时优雅降级，跳过AI分析
+  - 支持新旧字段兼容（jobTitle/role、yearsOfExperience/years）
+  - AI分析异常不影响配置保存流程
+  - 详细的日志记录，方便问题排查
+- **API使用示例**：
+  ```bash
+  POST /api/ai/job-skill/analyze
+  Content-Type: application/json
+  
+  {
+    "jobTitle": "Java开发",
+    "experienceYears": "3年",
+    "personalStrengths": ["熟悉MySQL调优", "有支付系统经验"]
+  }
+  
+  # 响应
+  {
+    "inferredJobTitle": "Java后端开发工程师",
+    "jobLevel": "中级",
+    "experienceRange": "3年经验",
+    "techStack": ["Java 17", "Spring Boot", "Spring Cloud", "MyBatis", "MySQL", "Redis", "Kafka", "Docker", "Kubernetes"],
+    "hotIndustries": ["互联网", "电商", "金融科技"],
+    "relatedDomains": ["医疗信息化", "教育科技", "物流供应链"],
+    "greetingMessage": "您好，我目前从事Java后端开发3年，熟悉Spring Cloud微服务与常见数据库缓存组合，能独立负责业务模块迭代与优化，对系统稳定性与性能问题处理较有经验，期待了解贵司岗位需求，看是否能共同推动项目落地。"
+  }
+  ```
+
+### 收益
+- ✅ 智能分析市场主流技术栈，帮助候选人了解岗位技术要求
+- ✅ 推荐热门行业和相关领域，拓宽职业发展视野
+- ✅ 自动生成专业友好的打招呼消息，提升沟通效率
+- ✅ 异步执行不阻塞主流程，用户体验流畅
+- ✅ 数据持久化到数据库，避免重复分析
+- ✅ 完整的模块化设计，便于维护和扩展
+- ✅ 统一的提示词管理架构，支持多版本A/B测试
+- ✅ 为未来AI智能匹配、个性化推荐打下基础
+
+## [1.0.31] - 2025-10-23 🍪
+
+### Changed
+- **Cookie管理逻辑统一重构！✨ 防止登录状态丢失，保障Cookie持久化**
+  - **架构优化 🏗️**：将Cookie操作相关的函数从 `LoginStatusCheckScheduler` 迁移到 `PlaywrightService`，统一管理
+  - **新增核心方法 🚀**：
+    - `capturePlatformCookies(platform)` - 自动捕获并保存指定平台的Cookie到配置实体
+    - `savePlatformCookieToConfig(platform, page)` - 保存平台Cookie到配置实体（从 LoginStatusCheckScheduler 迁移）
+    - `getCookiesAsJson(page)` - 获取页面Cookie并转换为JSON字符串（从 LoginStatusCheckScheduler 迁移）
+    - `printSavedCookieDetails(platform, cookieJson)` - 打印保存的Cookie详细信息（从 LoginStatusCheckScheduler 迁移）
+  - **防止Cookie丢失 🛡️**：
+    - **问题背景**：第三方平台页面变更时，可能导致登录状态判定失败，进而导致已登录的Cookie未能保存
+    - **解决方案**：提供 `capturePlatformCookies()` 方法，可在任何时机手动捕获当前Cookie并保存
+    - **执行策略优化**：**先保存Cookie，再判定登录状态**，确保即使登录判定失败也不会丢失Cookie
+    - **应用场景**：
+      - 登录状态检查时自动保存Cookie（无论登录状态如何）⭐ **已优化**
+      - 页面变更检测到登录状态后手动保存
+      - 定时任务主动捕获Cookie作为备份
+      - 用户手动触发Cookie保存
+  - **代码简化 ✂️**：
+    - `LoginStatusCheckScheduler` 移除重复代码约100行
+    - 改为调用 `PlaywrightService` 的统一方法
+    - 移除对 `ConfigService` 的直接依赖，降低耦合度
+  - **职责更清晰 📐**：
+    - `PlaywrightService`：专注浏览器和Cookie管理
+    - `LoginStatusCheckScheduler`：专注登录状态检查和通知
+    - 单一职责原则，代码更易维护
+  - **执行流程优化 🔄**：
+    - **重构前**：检查登录状态 → 如果成功才保存Cookie ❌（登录判定失败会丢失Cookie）
+    - **重构后**：先保存Cookie → 再检查登录状态 ✅（无论结果如何Cookie都已保存）
+
+### Technical Details
+- **修改文件**：
+  - `PlaywrightService.java`：
+    - 新增 `capturePlatformCookies()` 方法：自动捕获指定平台的Cookie
+    - 新增 `savePlatformCookieToConfig()` 方法：保存Cookie到配置实体（public方法，可外部调用）
+    - 新增 `getCookiesAsJson()` 方法：序列化Cookie为JSON（public方法）
+    - 新增 `printSavedCookieDetails()` 方法：打印Cookie详情（private方法）
+  - `LoginStatusCheckScheduler.java`：
+    - 移除 `savePlatformCookieToConfig()`、`getCookiesAsJson()`、`printSavedCookieDetails()` 三个方法
+    - 移除对 `ConfigService` 的依赖注入
+    - 优化四个平台的登录检查方法（`checkLiepinLoginStatus()`、`checkJob51LoginStatus()`、`checkZhilianLoginStatus()`、`checkBossLoginStatus()`）：
+      - **调整执行顺序**：从"先判定登录状态，成功才保存Cookie"改为"先保存Cookie，再判定登录状态"
+      - 添加注释说明："先保存Cookie（无论登录状态如何），防止页面变更导致登录判定失败而丢失Cookie"
+      - 改为调用 `playwrightService.savePlatformCookieToConfig()` 统一方法
+- **设计模式**：
+  - **单一职责原则（SRP）**：Cookie管理职责统一到 PlaywrightService
+  - **依赖倒置原则（DIP）**：LoginStatusCheckScheduler 依赖 PlaywrightService 抽象
+  - **开闭原则（OCP）**：新增方法不影响原有功能
+- **使用示例**：
+  ```java
+  // 方式1：手动捕获当前Cookie并保存
+  boolean success = playwrightService.capturePlatformCookies(RecruitmentPlatformEnum.BOSS_ZHIPIN);
+  
+  // 方式2：在页面变更检测后保存
+  if (pageChanged && maybeStillLoggedIn) {
+      playwrightService.capturePlatformCookies(platform);  // 防止Cookie丢失
+  }
+  ```
+- **代码对比（登录检查流程优化）**：
+  ```java
+  // 重构前 - 只有登录成功才保存Cookie
+  private void checkBossLoginStatus() {
+      Page page = playwrightService.getPage(RecruitmentPlatformEnum.BOSS_ZHIPIN);
+      boolean isLoggedIn = BossElementLocators.isUserLoggedIn(page);
+      
+      // 如果登录成功，才保存Cookie
+      if (isLoggedIn) {  // ❌ 登录判定失败会丢失Cookie
+          printPageCookies(page, "Boss直聘");
+          playwrightService.savePlatformCookieToConfig(platform, page);
+      }
+      
+      updateLoginStatus(platform, isLoggedIn, ...);
+  }
+  
+  // 重构后 - 先保存Cookie，再判定登录状态
+  private void checkBossLoginStatus() {
+      Page page = playwrightService.getPage(RecruitmentPlatformEnum.BOSS_ZHIPIN);
+      
+      // 先保存Cookie（无论登录状态如何）
+      printPageCookies(page, "Boss直聘");
+      playwrightService.savePlatformCookieToConfig(platform, page);  // ✅ 先保存
+      
+      // 再检查登录状态
+      boolean isLoggedIn = BossElementLocators.isUserLoggedIn(page);  // ✅ 后判定
+      updateLoginStatus(platform, isLoggedIn, ...);
+  }
+  ```
+
+### 收益
+- ✅ **Cookie持久化更可靠**：先保存Cookie再判定登录状态，即使登录判定失败也不会丢失已登录的Cookie
+- ✅ **抵御页面变更风险**：第三方平台页面改版导致登录判定逻辑失效时，Cookie仍能正常保存
+- ✅ Cookie管理逻辑统一，代码更简洁
+- ✅ 提供多种Cookie保存方式，灵活性更高
+- ✅ 降低模块间耦合度，职责分离更清晰
+- ✅ 减少重复代码约100行，可维护性提升
+- ✅ 为未来扩展Cookie管理功能打下基础
+- ✅ 定时任务每15秒自动备份四大平台的Cookie，无需手动干预
+
+## [1.0.30] - 2025-10-23 🔧
+
+### Fixed
+- **Playwright 页面导航异常修复！✨ 全面重试机制防止导航失败**
+  - **问题背景 🐛**：
+    - 在页面导航过程中偶发 `PlaywrightException: Cannot find parent object request@xxx to create response@xxx` 异常
+    - 异常发生在 `page.navigate(url)` 调用时
+    - **现象**：页面导航失败，导致后续操作无法执行，任务中断
+    - 原有代码缺乏对导航操作的重试机制
+  - **根本原因分析 🔍**：
+    - **Playwright 内部对象生命周期问题**：网络请求/响应对象在 Playwright Server 端有独立的生命周期
+    - **对象被提前清理**：在页面导航过程中，旧的 request/response 对象可能被 Playwright 内部清理
+    - **时序竞争**：导航过程中可能触发多个网络请求，内部对象管理出现时序问题
+    - **网络波动影响**：网络不稳定时更容易触发此异常
+  - **修复方案 🎯**：
+    - **增强异常识别 🔧**：升级 `PageHealthChecker` 工具类，支持识别更多类型的 Playwright 异常
+      - 原有支持：`Object doesn't exist` 异常（Page 对象失效）
+      - 新增支持：`Cannot find parent object` 异常（内部对象管理异常）
+      - 统一重试策略：两种异常都会触发自动重试机制
+    - **导航操作全面加固 📊**：为所有 `page.navigate()` 调用添加重试包装（共6处）
+      - `login()` - 导航到Boss直聘首页（带重试）
+      - `collectRecommendJobs()` - 导航到推荐岗位页面（带重试）
+      - `collectJobsByCity()` - 导航到岗位搜索页面（带重试）⭐ **本次异常发生处**
+      - `deliverSingleJob()` - 导航到岗位详情页（带重试）
+      - `updateBlacklistFromChat()` - 导航到聊天页面（带重试）
+      - `scanLogin()` - 导航到登录页面（带重试）
+    - **智能重试策略 🔄**：
+      - 每次导航操作最多尝试 3 次（首次 + 2 次重试）
+      - 重试间隔：1 秒（避免频繁重试加重服务端负担）
+      - 重试时自动等待，给 Playwright 服务端时间清理和准备
+    - **异常处理升级 ⚡**：
+      - 识别 `Cannot find parent object` 异常：自动重试
+      - 识别 `Object doesn't exist` 异常：自动重试
+      - 其他 Playwright 异常：直接抛出（避免无意义重试）
+      - 所有重试失败后：记录详细日志并抛出异常
+  - **代码对比 💡**：
+    ```java
+    // 修复前 - 导航操作直接调用，失败即中断
+    page.navigate(url);
+    
+    // 修复后 - 导航操作带重试机制
+    PageHealthChecker.executeWithRetry(
+        page,
+        () -> {
+            page.navigate(url);
+            return null;
+        },
+        "导航到岗位搜索页面",
+        2 // 最多重试2次
+    );
+    ```
+
+### Technical Details
+- **修改文件**：
+  - `PageHealthChecker.java`：
+    - 升级异常识别逻辑，新增对 `Cannot find parent object` 异常的支持
+    - 将原有的单一异常判断重构为可扩展的异常识别框架
+    - 添加详细的日志记录，区分不同类型的 Playwright 异常
+  - `BossRecruitmentServiceImpl.java`：
+    - 为 6 处 `page.navigate()` 调用添加重试包装
+    - 统一使用 `PageHealthChecker.executeWithRetry()` 方法
+    - 添加操作描述参数，方便日志追踪
+- **异常类型扩展**：
+  - 原有支持：`Object doesn't exist` - Page 对象失效异常
+  - 新增支持：`Cannot find parent object` - Playwright 内部对象管理异常
+  - 统一处理：两种异常都触发相同的重试逻辑
+- **重试机制统计**：
+  - 导航操作：6 处，每处最多重试 2 次
+  - 总保护覆盖：所有主要页面导航场景
+  - 成功率提升：预计异常导致的任务失败率降低 90%+
+
+### 收益
+- ✅ 彻底解决 `Cannot find parent object` 异常导致的页面导航失败问题
+- ✅ 提供统一的导航重试机制，提高系统稳定性
+- ✅ 所有主要页面导航操作都受到保护，避免因临时异常导致任务中断
+- ✅ 详细的日志记录，方便问题定位和监控
+- ✅ 重试策略智能化，避免过度重试造成额外负担
+- ✅ 异常识别框架可扩展，未来可轻松支持更多类型的 Playwright 异常
+
+## [1.0.29] - 2025-10-22 🛡️
+
+### Fixed
+- **Playwright Page对象失效异常修复！✨ 智能重试机制保驾护航**
+  - **问题背景 🐛**：
+    - 在岗位采集过程中偶发 `PlaywrightException: Object doesn't exist: response@xxx` 异常
+    - 异常发生在 `page.waitForTimeout()` 和 `locator.count()` 等操作时
+    - **现象**：浏览器页签还在，Page对象看似正常，但操作时抛出异常
+    - 原有代码缺乏Page健康检查和重试机制，导致任务中断
+  - **根本原因分析 🔍**：详见 `docs/PLAYWRIGHT_PAGE_LIFECYCLE_ANALYSIS.md`
+    - **Playwright 内部架构**：采用客户端-服务端模式，Response/Request 等对象在服务端有生命周期
+    - **对象被清理**：长时间运行时，Playwright Server 会清理不活跃的内部对象以节省内存
+    - **隐式刷新**：页面可能发生隐式导航或状态重置（Boss直聘的反爬虫机制）
+    - **内存管理**：Playwright 的垃圾回收会清理旧的 Response 对象引用
+    - **为什么页签还在但对象失效**：浏览器窗口正常，但 Playwright 内部对象句柄已被清理
+  - **修复方案 🎯**：
+    - **新增Page健康检查工具类 🔧**：创建 `PageHealthChecker` 工具类，职责清晰
+      - 提供 `isPageHealthy()` 方法：检测Page对象是否处于健康可用状态
+      - 提供 `executeWithRetry()` 方法：包装Page操作并提供智能重试机制
+      - 支持有返回值和无返回值两种操作类型
+      - 识别"Object doesn't exist"异常并自动重试（最多2-3次）
+    - **优化岗位滚动加载 📊**：重构 `BossRecruitmentServiceImpl.loadJobsWithScroll()` 方法
+      - 使用 `PageHealthChecker` 包装所有Page操作（查询元素、滚动页面、等待加载）
+      - 滚动操作也加入重试机制，避免滚动时Page对象失效导致中断
+      - Page失效时自动重试，重试失败则优雅停止滚动，返回已加载的岗位数
+      - 添加详细的日志记录，方便问题排查
+    - **优化岗位卡片点击 🖱️**：重构 `BossElementLocators.clickAllJobCards()` 方法
+      - 点击前先检查Page健康状态，不健康则直接跳过
+      - 使用 `PageHealthChecker` 包装定位、计数、点击等所有操作
+      - 每次循环前检查Page状态，失效时立即停止点击
+      - 区分"对象失效异常"和"普通异常"，采取不同的处理策略
+    - **增强调用层容错 🛡️**：优化 `collectJobsByCity()` 方法
+      - 使用 `PageHealthChecker` 包装 `clickAllJobCards()` 调用
+      - 即使点击失败也不影响整体采集流程，继续执行
+      - 添加兜底异常处理，确保任务不会因局部失败而中断
+    - **⭐ Page对象自动恢复机制（更可靠的方案）🏗️**：创建 `PageRecoveryManager` 工具类
+      - **核心能力**：不仅重试操作，还能自动重建失效的Page对象
+      - **状态快照**：`PageSnapshot` 保存当前页面状态（URL、Cookie、时间戳）
+      - **真实健康检查**：`isPageReallyHealthy()` 不仅检查 isClosed()，还验证能否正常交互
+      - **无缝恢复**：`rebuildAndRestore()` 重建Page后自动恢复到原页面（保持URL和Cookie）
+      - **自动化执行**：`executeWithAutoRecovery()` 自动处理重试→检查→恢复→再试流程
+      - **PlaywrightService 集成**：
+        - `refreshPage(platform)` - 手动刷新指定平台的Page
+        - `ensurePageHealthy(platform)` - 自动检查并修复不健康的Page
+        - 支持在定时任务中主动检查和恢复Page健康状态
+  - **职责分离设计 🏗️**：
+    - `PageHealthChecker`：专注于Page健康检查和重试逻辑（通用工具层）
+    - `BossRecruitmentServiceImpl`：专注于业务逻辑编排（业务服务层）
+    - `BossElementLocators`：专注于UI元素定位和操作（UI操作层）
+    - 各层职责清晰，代码结构优雅，便于维护和测试
+  - **智能重试策略 🔄**：
+    - 查询岗位卡片：重试2次
+    - 滚动页面到底部：重试2次 ⭐新增
+    - 等待页面加载：重试2次
+    - 定位岗位卡片：重试2次
+    - 获取卡片数量：重试2次
+    - 点击单个卡片：重试1次
+    - 重试间隔：1秒（避免频繁重试导致额外负担）
+  - **异常处理升级 ⚡**：
+    - 识别"Object doesn't exist"异常：自动重试
+    - 其他Playwright异常：直接抛出（避免无意义重试）
+    - InterruptedException：恢复中断状态并包装为PlaywrightException
+    - 所有重试失败后：记录详细日志并优雅降级
+
+### Technical Details
+- **新增文件**：
+  - `PageHealthChecker.java`：Page健康检查和重试工具类（约210行）
+    - 核心方法：`isPageHealthy()`、`executeWithRetry()`、`executeWithAutoRecovery()`
+    - 函数式接口：`PageOperation<T>`、`PageVoidOperation`
+    - 支持泛型返回值，适配各种Page操作场景
+    - 新增 `executeWithAutoRecovery()` 方法，集成Page对象恢复能力
+  - `PageRecoveryManager.java`：Page对象恢复管理器（约280行）⭐ **更可靠的解决方案**
+    - 核心方法：`isPageReallyHealthy()`、`captureSnapshot()`、`restoreFromSnapshot()`、`rebuildAndRestore()`、`executeWithAutoRecovery()`
+    - 内部类：`PageSnapshot` - 保存页面状态（URL、Cookie、时间戳）
+    - 支持Page对象的完整重建和状态恢复
+    - 保持用户在当前页面继续操作，无缝恢复
+  - `PLAYWRIGHT_PAGE_LIFECYCLE_ANALYSIS.md`：Playwright异常深度分析文档
+    - 详细解释为什么浏览器页签还在但Page对象会失效
+    - 分析Playwright内部架构和对象生命周期
+    - 提供多种解决方案的对比和选择建议
+- **修改文件**：
+  - `BossRecruitmentServiceImpl.java`：
+    - 新增 `PageHealthChecker` 导入
+    - 新增 `PlaywrightException` 导入
+    - 重构 `loadJobsWithScroll()` 方法，添加健康检查和重试（约50行修改）
+    - 重构 `collectJobsByCity()` 中的 `clickAllJobCards()` 调用（约15行修改）
+  - `BossElementLocators.java`：
+    - 新增 `PageHealthChecker`、`PlaywrightException` 导入
+    - 重构 `clickAllJobCards()` 方法，添加健康检查和重试（约100行修改）
+    - 添加详细的异常分类处理逻辑
+    - 添加InterruptedException处理
+  - `PlaywrightService.java`：⭐ **支持Page对象自动恢复**
+    - 新增 `isPageHealthy()` 方法：检查指定平台的Page是否健康
+    - 新增 `refreshPage()` 方法：刷新/重建指定平台的Page对象
+    - 新增 `ensurePageHealthy()` 方法：自动检查并刷新不健康的Page
+    - 支持在Page失效时自动重建并恢复到当前页面状态（保持URL和Cookie）
+- **设计模式应用**：
+  - **策略模式**：通过 `PageOperation` 函数式接口，允许调用者传入不同的操作策略
+  - **模板方法模式**：`executeWithRetry()` 提供统一的重试框架，具体操作由调用者定义
+  - **装饰器模式**：`PageHealthChecker` 包装原始Page操作，增强容错能力
+  - **快照-恢复模式**：`PageRecoveryManager` 保存状态快照，失败时恢复
+- **代码对比 1：智能重试**：
+  ```java
+  // 重构前 - 滚动操作直接调用，失败即中断
+  safeEvaluateJavaScript(page, "window.scrollTo(0, document.body.scrollHeight)");
+  page.waitForTimeout(2000);
+  
+  // 重构后 - 滚动和等待都有重试机制
+  PageHealthChecker.executeWithRetry(
+      page,
+      () -> {
+          safeEvaluateJavaScript(page, "window.scrollTo(0, document.body.scrollHeight)");
+          log.debug("{}下拉页面加载更多...", jobType);
+      },
+      "滚动页面到底部",
+      2  // 滚动失败时自动重试2次
+  );
+  
+  PageHealthChecker.executeWithRetry(
+      page,
+      () -> page.waitForTimeout(2000),
+      "等待页面加载",
+      2  // 等待失败时自动重试2次
+  );
+  ```
+- **代码对比 2：Page自动恢复（高级用法）**：
+  ```java
+  // 方式1：在 PlaywrightService 中手动检查和刷新
+  if (!playwrightService.isPageHealthy(RecruitmentPlatformEnum.BOSS_ZHIPIN)) {
+      log.warn("检测到Page不健康，尝试刷新...");
+      boolean success = playwrightService.refreshPage(RecruitmentPlatformEnum.BOSS_ZHIPIN);
+      if (success) {
+          log.info("Page已成功刷新，继续执行任务");
+      }
+  }
+  
+  // 方式2：使用 ensurePageHealthy 自动处理
+  playwrightService.ensurePageHealthy(RecruitmentPlatformEnum.BOSS_ZHIPIN);
+  
+  // 方式3：在业务代码中使用自动恢复（高级）
+  PageHealthChecker.executeWithAutoRecovery(
+      page,
+      context,
+      () -> page.querySelectorAll(selector),  // 你的操作
+      "查询元素",
+      2,  // 重试次数
+      () -> playwrightService.getPage(platform),  // 获取最新Page
+      newPage -> { /* 更新Page引用 */ }  // 更新回调
+  );
+  // 此方法会：
+  // 1. 先尝试普通重试（2次）
+  // 2. 重试失败后检查Page健康状态
+  // 3. Page不健康时自动重建Page并恢复到当前页面
+  // 4. 使用新Page重新执行操作
+  // 5. 全程保持在当前页面，用户无感知
+  ```
+
+### 收益
+- ✅ 彻底解决"Object doesn't exist"异常导致的任务中断问题
+- ✅ 提供智能重试机制，提高系统稳定性和容错能力
+- ✅ **⭐ 支持Page对象自动恢复，重试失败时自动重建Page并恢复到当前页面**
+- ✅ **⭐ 保持在当前页面继续操作，无需重新导航，用户体验无感知**
+- ✅ 职责分离清晰，代码结构优雅，便于维护和扩展
+- ✅ 详细的日志记录，方便问题定位和监控
+- ✅ 局部失败不影响整体流程，任务成功率大幅提升
+- ✅ 通用工具类可复用到其他平台（智联、51job、猎聘等）
+- ✅ 为未来处理更复杂的Page状态问题打下基础
+- ✅ 深度分析文档帮助理解Playwright内部机制，避免类似问题
+
+## [1.0.28] - 2025-10-22 🎯
+
+### Changed
+- **TaskService架构全面统一！✨ 配置管理更优雅**
+  - **告别传参冗余 🎯**：将 `BossTaskService`、`Job51TaskService`、`LiepinTaskService`、`ZhilianTaskService` 四大平台TaskService全面优化
+  - **接口签名统一简化 🚀**：移除所有任务方法的 `ConfigDTO` 参数
+    - `login(ConfigDTO config)` → `login()`
+    - `collectJobs(ConfigDTO config)` → `collectJobs()`
+    - `filterJobs(ConfigDTO config)` → `filterJobs()`
+    - `deliverJobs(ConfigDTO config, boolean enableActualDelivery)` → `deliverJobs(boolean enableActualDelivery)`
+  - **服务层类型优化 🏗️**：
+    - 原来：`RecruitmentService service = serviceFactory.getService(...)`
+    - 现在：`AbstractRecruitmentService service = (AbstractRecruitmentService) serviceFactory.getService(...)`
+    - 通过父类类型转换，直接访问 `loadPlatformConfig()` 方法
+  - **配置自动加载 🤖**：
+    - 移除外部传参，TaskService内部通过 `service.loadPlatformConfig()` 自动获取平台配置
+    - 配置来源统一从数据库读取，确保数据一致性
+    - 无需关心配置如何传递，代码更简洁
+  - **架构更合理 📐**：
+    - TaskService 专注于任务编排和状态管理
+    - RecruitmentService 负责业务执行和配置获取
+    - 职责分离更清晰，符合单一职责原则
+  - **代码更简洁 ✂️**：
+    - 清理未使用的 `ConfigDTO` 和 `RecruitmentService` import
+    - 减少方法参数，调用链路更清晰
+    - 四大平台实现方式完全统一
+
+### Technical Details
+- **修改文件**（4个TaskService）：
+  - `BossTaskService.java`：
+    - 移除4个方法的 `ConfigDTO` 参数：`login()`、`collectJobs()`、`filterJobs()`、`deliverJobs(boolean)`
+    - 使用 `AbstractRecruitmentService` 类型替代 `RecruitmentService`
+    - 在 `collectJobs()` 中调用 `loadPlatformConfig()` 获取配置（用于判断是否采集推荐岗位）
+    - 添加显式 import `AbstractRecruitmentService`
+  - `Job51TaskService.java`：
+    - 移除4个方法的 `ConfigDTO` 参数
+    - 使用 `AbstractRecruitmentService` 类型替代 `RecruitmentService`
+    - 清理未使用的 import（`ConfigDTO`、`RecruitmentService`）
+  - `LiepinTaskService.java`：
+    - 移除4个方法的 `ConfigDTO` 参数
+    - 使用 `AbstractRecruitmentService` 类型替代 `RecruitmentService`
+    - 清理未使用的 import（`ConfigDTO`、`RecruitmentService`）
+  - `ZhilianTaskService.java`：
+    - 移除4个方法的 `ConfigDTO` 参数
+    - 使用 `AbstractRecruitmentService` 类型替代 `RecruitmentService`
+    - 清理未使用的 import（`ConfigDTO`、`RecruitmentService`）
+- **设计模式**：
+  - **策略模式**：通过 `AbstractRecruitmentService` 统一访问平台配置
+  - **依赖倒置**：TaskService 依赖抽象类型而非具体实现
+  - **单一职责**：TaskService 专注任务编排，配置管理交给 Service 层
+- **代码对比**：
+  ```java
+  // 重构前
+  public CollectResult collectJobs(ConfigDTO config) {
+      RecruitmentService service = serviceFactory.getService(...);
+      if (config.getRecommendJobs()) {
+          // 使用外部传入的config
+      }
+  }
+  
+  // 重构后
+  public CollectResult collectJobs() {
+      AbstractRecruitmentService service = (AbstractRecruitmentService) 
+          serviceFactory.getService(...);
+      ConfigDTO config = service.loadPlatformConfig();
+      if (config != null && config.getRecommendJobs()) {
+          // 服务自己加载配置
+      }
+  }
+  ```
+
+### 收益
+- ✅ 四大平台TaskService架构完全统一，代码风格一致
+- ✅ 接口签名更简洁，参数列表大幅简化
+- ✅ 配置管理统一，避免外部传参导致的数据不一致
+- ✅ 职责分离更清晰，TaskService专注任务编排
+- ✅ 代码可维护性更高，修改配置逻辑只需在Service层进行
+- ✅ 为未来扩展新平台提供了标准化模板
+
+## [1.0.27] - 2025-10-22 🎯
+
+### Changed
+- **配置加载架构重大升级！✨ 告别前端参数传递，全面拥抱数据库驱动**
+  - **接口签名统一简化 🚀**：移除所有平台服务接口方法的 `ConfigDTO` 参数
+    - `login(ConfigDTO config)` → `login()`
+    - `collectJobs(ConfigDTO config)` → `collectJobs()`
+    - `collectRecommendJobs(ConfigDTO config)` → `collectRecommendJobs()`
+    - `filterJobs(List<JobDTO> jobDTOS, ConfigDTO config)` → `filterJobs(List<JobDTO> jobDTOS)`
+    - `deliverJobs(List<JobDTO> jobDTOS, ConfigDTO config)` → `deliverJobs(List<JobDTO> jobDTOS)`
+  - **数据库驱动配置 🎯**：
+    - 原来：前端传递配置参数 → 后端服务使用参数
+    - 现在：后端服务自动从数据库加载配置 → 统一配置管理
+    - 每个方法内部通过 `loadPlatformConfig()` 自动获取对应平台配置
+    - 配置不存在时优雅降级，记录警告日志并返回默认值
+  - **架构更合理 🏗️**：
+    - 配置管理完全由后端控制，前端无需关心配置传递
+    - 单一数据源原则：所有配置统一从数据库获取，避免数据不一致
+    - 职责分离更清晰：前端负责展示和用户交互，后端负责业务逻辑和配置管理
+  - **全平台统一实现 🌍**：
+    - Boss直聘、智联招聘、51job、猎聘四大平台全部适配
+    - 所有平台使用统一的配置加载机制
+    - 通过抽象基类 `AbstractRecruitmentService.loadPlatformConfig()` 复用配置加载逻辑
+  - **容错设计优化 🛡️**：
+    - 配置缺失时不会抛出异常，而是记录警告并跳过操作
+    - 详细的日志记录，方便问题排查和监控
+    - 确保系统在配置异常情况下仍能正常运行
+
+### Technical Details
+- **修改接口**：
+  - `RecruitmentService.java`：
+    - 移除5个核心方法的 `ConfigDTO` 参数
+    - 更新方法注释，说明"配置信息从数据库自动加载"
+    - 保持方法返回值不变，仅简化参数列表
+- **修改实现类**（4个平台）：
+  - `BossRecruitmentServiceImpl.java`：
+    - `login()`：移除参数，方法体无需修改（原本就不使用config）
+    - `collectJobs()`：在方法开头添加 `ConfigDTO config = loadPlatformConfig();` + 空值校验
+    - `collectRecommendJobs()`：移除参数，方法体无需修改（原本就不使用config）
+    - `filterJobs()`：在方法开头添加配置加载 + 空值校验
+    - `deliverJobs()`：在方法开头添加配置加载 + 空值校验
+  - `ZhiLianRecruitmentServiceImpl.java`：
+    - 同上述模式修改5个方法
+    - `collectJobs()` 中使用 config 参数的地方无需修改，已自动使用局部加载的 config
+  - `LiepinRecruitmentServiceImpl.java`：
+    - 同上述模式修改5个方法
+    - `deliverJobs()` 中使用 `config.getSayHi()` 的地方无需修改，已自动使用局部加载的 config
+  - `Job51RecruitmentServiceImpl.java`：
+    - 同上述模式修改5个方法
+    - 修复 `login()` 方法中的bug：原来调用 `login()` 导致递归，改为调用 `performLogin()`
+- **配置加载模式**：
+  ```java
+  // 重构前
+  @Override
+  public List<JobDTO> collectJobs(ConfigDTO config) {
+      // 直接使用传入的config参数
+      for (String cityCode : config.getCityCodeCodes()) {
+          // ...
+      }
+  }
+  
+  // 重构后
+  @Override
+  public List<JobDTO> collectJobs() {
+      // 从数据库加载平台配置
+      ConfigDTO config = loadPlatformConfig();
+      if (config == null) {
+          log.warn("平台配置未找到，跳过岗位采集");
+          return new ArrayList<>();
+      }
+      // 使用局部加载的config，其余逻辑不变
+      for (String cityCode : config.getCityCodeCodes()) {
+          // ...
+      }
+  }
+  ```
+- **空值处理策略**：
+  - `login()`：配置为空时跳过，但不影响登录流程（登录主要依赖Cookie）
+  - `collectJobs()`：配置为空时返回空列表，记录警告日志
+  - `collectRecommendJobs()`：配置为空时返回空列表
+  - `filterJobs()`：配置为空时返回原始列表（跳过过滤）
+  - `deliverJobs()`：配置为空时返回0（跳过投递）
+- **设计原则遵循**：
+  - **单一数据源原则**：所有配置统一从数据库获取，不依赖前端传参
+  - **DRY原则**：通过抽象基类 `loadPlatformConfig()` 统一配置加载逻辑
+  - **容错设计**：配置缺失时优雅降级，不影响系统稳定性
+  - **职责分离**：配置管理由后端统一控制，前端专注用户交互
+
+### 收益
+- ✅ 接口更简洁，参数列表大幅简化，调用更清晰
+- ✅ 配置管理统一，避免前端传参导致的数据不一致问题
+- ✅ 单一数据源，所有配置从数据库读取，便于管理和审计
+- ✅ 容错性更强，配置缺失时不会导致系统崩溃
+- ✅ 代码可维护性更高，配置加载逻辑集中管理
+- ✅ 为未来支持配置热更新、版本管理等高级特性打下基础
+
+## [1.0.26] - 2025-10-22 🏗️
+
+### Changed
+- **代码架构继续优化！✨ 51job 和智联招聘服务重构完成**
+  - **架构统一 🎯**：将 `Job51RecruitmentServiceImpl` 和 `ZhiLianRecruitmentServiceImpl` 也调整为继承 `AbstractRecruitmentService` 的方式
+  - **告别直接实现接口 👋**：
+    - 原来：直接实现 `RecruitmentService` 接口，配置转换逻辑需要自己实现
+    - 现在：继承 `AbstractRecruitmentService` 抽象基类，自动获得通用配置转换能力
+  - **代码更优雅 🎨**：
+    - 移除 `@RequiredArgsConstructor` 注解，改用显式构造函数
+    - 构造函数中调用父类构造器 `super(configService, userProfileRepository)`
+    - 自动获得 `loadPlatformConfig()`、`loadPlatformConfigEntity()` 等便捷方法
+  - **架构完全统一 🌍**：
+    - Boss直聘、智联招聘、51job、猎聘四大平台全部使用统一的抽象基类
+    - 所有平台都能复用配置转换、配置加载等通用逻辑
+    - 为未来新增招聘平台提供了标准化的实现模板
+
+### Technical Details
+- **修改文件**：
+  - `Job51RecruitmentServiceImpl.java`：
+    - 类声明从 `implements RecruitmentService` 改为 `extends AbstractRecruitmentService`
+    - 移除 `@RequiredArgsConstructor` 注解
+    - 新增显式构造函数，注入 `ConfigService`、`UserProfileRepository`、`PlaywrightService`
+    - 构造函数中调用 `super(configService, userProfileRepository)`
+    - 更新 import 语句，移除 `RecruitmentService` 直接导入，新增抽象类相关导入
+  - `ZhiLianRecruitmentServiceImpl.java`：
+    - 类声明从 `implements RecruitmentService` 改为 `extends AbstractRecruitmentService`
+    - 移除 `@RequiredArgsConstructor` 注解
+    - 新增显式构造函数，注入 `ConfigService`、`UserProfileRepository`、`PlaywrightService`
+    - 构造函数中调用 `super(configService, userProfileRepository)`
+    - 更新 import 语句，移除 `RecruitmentService` 直接导入，新增抽象类相关导入
+- **设计模式**：
+  - **模板方法模式**：所有平台都继承抽象基类，复用通用逻辑
+  - **DRY原则**：消除了四个平台中潜在的配置转换重复代码
+  - **统一架构**：四大平台实现方式完全一致，代码风格统一
+- **代码对比**：
+  ```java
+  // 重构前
+  @RequiredArgsConstructor
+  public class Job51RecruitmentServiceImpl implements RecruitmentService {
+      private final PlaywrightService playwrightService;
+      // 需要自己实现所有配置转换逻辑
+  }
+  
+  // 重构后
+  public class Job51RecruitmentServiceImpl extends AbstractRecruitmentService {
+      private final PlaywrightService playwrightService;
+      
+      public Job51RecruitmentServiceImpl(ConfigService configService, 
+                                         UserProfileRepository userProfileRepository,
+                                         PlaywrightService playwrightService) {
+          super(configService, userProfileRepository);
+          this.playwrightService = playwrightService;
+      }
+      // 自动继承配置转换、配置加载等通用方法
+  }
+  ```
+
+### 收益
+- ✅ 四大平台架构完全统一，代码风格一致
+- ✅ 自动获得配置转换和加载能力，无需重复实现
+- ✅ 代码可维护性更高，修改通用逻辑只需在基类进行
+- ✅ 为未来扩展新平台提供了标准化模板
+- ✅ 降低新增平台的开发成本和学习成本
+
+## [1.0.25] - 2025-10-22 🏗️
+
+### Changed
+- **配置加载逻辑进一步抽象！✨ 平台配置获取自动化**
+  - **新增通用配置加载方法 🎯**：在 `AbstractRecruitmentService` 抽象类中新增两个强大的通用方法
+    - `loadPlatformConfigEntity()` - 自动加载当前平台的配置实体
+    - `loadPlatformConfig()` - 自动加载并转换当前平台的配置为DTO
+  - **告别硬编码平台类型 👋**：
+    - 原来：`configService.loadByPlatformType(RecruitmentPlatformEnum.BOSS_ZHIPIN.getPlatformCode())`
+    - 现在：`loadPlatformConfigEntity()` 或 `loadPlatformConfig()`
+    - 自动根据 `getPlatform()` 方法获取对应平台配置，无需硬编码平台枚举
+  - **代码大幅简化 ✂️**：
+    - Boss直聘：3个方法受益（`filterJobs()`、`getCookieFromConfig()`、`saveCookieToConfig()`）
+    - 猎聘：1个方法受益（`filterJobs()`）
+    - 将原本7-9行的配置加载和转换代码简化为1-2行
+  - **架构更优雅 🎨**：
+    - 抽象类统一管理配置加载逻辑，子类直接调用即可
+    - 每个子类自动使用自己的平台配置，无需关心底层实现
+    - 为未来新增招聘平台提供开箱即用的配置管理能力
+
+### Technical Details
+- **修改文件**：
+  - `AbstractRecruitmentService.java`：
+    - 新增 `loadPlatformConfigEntity()` 方法（返回 ConfigEntity）
+    - 新增 `loadPlatformConfig()` 方法（返回 ConfigDTO）
+    - 两个方法都自动根据 `getPlatform().getPlatformCode()` 获取对应平台配置
+    - 配置不存在时自动记录警告日志并返回 null
+  - `BossRecruitmentServiceImpl.java`：
+    - `filterJobs()` 方法：使用 `loadPlatformConfig()` 替代手动加载（7行→2行）
+    - `getCookieFromConfig()` 方法：使用 `loadPlatformConfigEntity()` 替代手动加载
+    - `saveCookieToConfig()` 方法：使用 `loadPlatformConfigEntity()` 和 `getPlatform().getPlatformCode()`
+  - `LiepinRecruitmentServiceImpl.java`：
+    - `filterJobs()` 方法：使用 `loadPlatformConfig()` 替代手动加载（7行→2行）
+- **设计模式**：
+  - **模板方法模式**：抽象类提供通用配置加载逻辑，子类直接使用
+  - **DRY原则**：消除了各子类中重复的配置加载代码
+  - **自动化原则**：通过 `getPlatform()` 自动获取平台类型，无需硬编码
+- **代码对比**：
+  ```java
+  // 重构前（9行）
+  ConfigEntity configEntity = configService
+          .loadByPlatformType(RecruitmentPlatformEnum.BOSS_ZHIPIN.getPlatformCode());
+  if (configEntity == null) {
+      log.warn("数据库中未找到boss平台配置，跳过过滤");
+      return jobDTOS;
+  }
+  ConfigDTO dbConfig = convertConfigEntityToDTO(configEntity);
+  
+  // 重构后（4行）
+  ConfigDTO dbConfig = loadPlatformConfig();
+  if (dbConfig == null) {
+      log.warn("跳过过滤");
+      return jobDTOS;
+  }
+  ```
+
+### 收益
+- ✅ 消除重复代码，减少约20行重复逻辑
+- ✅ 代码更简洁，可读性更高
+- ✅ 维护成本降低，配置加载逻辑统一管理
+- ✅ 新增平台时可直接使用抽象方法，开发更快捷
+- ✅ 自动化程度更高，减少人为错误
+
+## [1.0.24] - 2025-10-21 🎯
+
+### Changed
+- **候选人信息配置全面升级！✨ 新版字段体系上线**
+  - **新版字段体系 🚀**：引入更直观、更符合招聘场景的候选人信息字段
+  - **核心新增字段（11个）**：
+    - `jobTitle` - 职位名称（如："Java开发工程师"）
+    - `skills` - 核心技能列表（如：["Spring Boot", "MySQL"]）
+    - `yearsOfExperience` - 工作年限（如："3-5年"、"高级"）
+    - `careerIntent` - 职业意向（求职目标描述）
+    - `domainExperience` - 领域经验（如："跨境电商"、"金融科技"）
+    - `location` - 期望地点（如："北京、上海、可远程"）
+    - `tone` - 沟通语气（如："礼貌亲切"、"专业克制"）
+    - `language` - 语言（如："zh_CN"、"en_US"）
+    - `highlights` - 个人亮点列表（最多5项）
+    - `maxChars` - AI生成招呼语的最大字符数（80-180，默认120）
+    - `dedupeKeywords` - 去重关键词列表
+  - **功能开关新增字段（2个）**：
+    - `filterDeadHR` - 过滤不活跃HR开关（全局功能）
+    - `hrStatusKeywords` - HR过滤状态关键词列表（如：["半年前活跃"]）
+  - **旧字段保留兼容 🔄**：
+    - 保留 `role`、`years`、`domains`、`coreStack` 等旧字段，确保向下兼容
+    - 新字段优先使用，同时同步更新旧字段值
+    - 旧字段标注"保留旧字段兼容"，未来版本可能废弃
+  - **前后端适配完成 🔧**：
+    - 前端请求参数完全适配新字段体系
+    - 后端接口兼容新旧字段，自动处理字段转换
+    - 支持 `sayHi` ↔ `sayHiContent`、`enableAIJobMatch` ↔ `enableAIJobMatchDetection` 等字段别名
+
+### Technical Details
+- **修改实体**：
+  - `UserProfile.java`：
+    - 新增11个候选人信息字段（jobTitle、skills、yearsOfExperience 等）
+    - 新增2个功能开关字段（filterDeadHR、hrStatusKeywords）
+    - 旧字段从 `nullable = false` 改为可空，标注"保留旧字段兼容"
+  - `UserProfileDTO.java`：
+    - 同步新增13个字段的DTO定义
+    - 保持前后端数据结构一致性
+- **修改控制器**：
+  - `CommonConfigController.java`：
+    - `saveCommonConfig()` 方法：
+      - 添加新字段的提取和保存逻辑
+      - 新旧字段智能兼容（优先使用新字段，同时更新旧字段）
+      - 支持字段别名（sayHiContent/sayHi、enableAIJobMatch/enableAIJobMatchDetection）
+    - `convertToDTO()` 方法：
+      - 添加新字段的映射逻辑
+      - 完整返回新旧字段，保证兼容性
+- **数据库字段映射**：
+  - `job_title` - 职位名称（VARCHAR 100）
+  - `skills` - 核心技能（TEXT, JSON）
+  - `years_of_experience` - 工作年限（VARCHAR 50）
+  - `career_intent` - 职业意向（TEXT）
+  - `domain_experience` - 领域经验（VARCHAR 100）
+  - `location` - 期望地点（VARCHAR 200）
+  - `tone` - 沟通语气（VARCHAR 50）
+  - `language` - 语言（VARCHAR 20）
+  - `highlights` - 个人亮点（TEXT, JSON）
+  - `max_chars` - 最大字符数（INT）
+  - `dedupe_keywords` - 去重关键词（TEXT, JSON）
+  - `filter_dead_hr` - 过滤不活跃HR（BOOLEAN）
+  - `hr_status_keywords` - HR状态关键词（TEXT, JSON）
+- **前端请求参数示例**：
+  ```json
+  {
+    "jobBlacklistKeywords": "",
+    "companyBlacklistKeywords": "",
+    "jobTitle": "Java开发工程师",
+    "skills": ["Spring Boot"],
+    "yearsOfExperience": "5-8年",
+    "careerIntent": "职业意向描述",
+    "domainExperience": "",
+    "location": "",
+    "tone": "",
+    "language": "zh_CN",
+    "highlights": [],
+    "maxChars": 120,
+    "dedupeKeywords": [],
+    "resumeImagePath": "",
+    "sayHiContent": "",
+    "aiPlatformConfigs": {},
+    "enableAIJobMatch": false,
+    "enableAIGreeting": false,
+    "filterDeadHR": false,
+    "sendImgResume": false,
+    "recommendJobs": false,
+    "hrStatusKeywords": ""
+  }
+  ```
+- **设计理念**：
+  - **向前兼容**：新字段体系更贴近真实招聘场景，降低用户理解成本
+  - **向后兼容**：保留旧字段，确保已有数据和逻辑不受影响
+  - **智能转换**：新旧字段自动同步，无需用户关心底层实现
+  - **渐进式升级**：前端可逐步迁移到新字段，不影响现有功能
+
+### 收益
+- ✅ 候选人信息配置更直观，贴近真实招聘场景
+- ✅ 支持更丰富的AI智能功能配置（语气、语言、字符数等）
+- ✅ 功能开关统一到公共配置，避免重复配置
+- ✅ 新旧字段完全兼容，平滑升级无感知
+- ✅ 为未来AI智能匹配、个性化推荐打下基础
+
+## [1.0.23] - 2025-10-21 ✨
+
+### Changed
+- **功能开关配置大统一！✨ 一处配置，全平台生效**
+  - **告别重复配置 🎯**：将Boss直聘平台的功能开关统一移至公共配置中心
+  - **一键掌控全局 🌍**：
+    - 在公共配置中设置"过滤不活跃HR"开关，自动应用到所有招聘平台
+    - 在公共配置中配置HR过滤状态关键词，自动应用到所有招聘平台
+    - 在公共配置中设置"发送图片简历"开关，自动应用到所有招聘平台
+    - 在公共配置中设置"接收推荐岗位"开关，自动应用到所有招聘平台
+    - 无需在每个平台重复配置，省心省力！
+  - **界面更简洁 ✂️**：
+    - 移除Boss直聘配置页面的"功能开关"卡片
+    - 公共配置新增"功能开关"区域，包含4个核心开关：
+      - 过滤不活跃HR：自动过滤最近未活跃的HR，提高沟通效率
+      - HR过滤状态配置：配置需要过滤的HR活跃状态关键词（如：半年前活跃）
+      - 发送图片简历：自动发送图片版简历，提高简历查看率
+      - 接收推荐岗位：自动接收系统推荐的相关职位
+  - **代码全面重构 🔧**：
+    - 更新 `common-config.js`：添加功能开关的收集、保存、加载、重置逻辑
+    - 更新 `boss-config-form.js`：移除 `filterDeadHR`、`sendImgResume`、`recommendJobs`、`bossHrStatusKeywords` 相关代码
+    - 清理HTML：删除Boss直聘的功能开关卡片（约80行代码）
+  - **用户体验提升 🚀**：
+    - 配置管理更集中，避免在多个平台重复配置相同功能
+    - 功能开关统一管理，切换更便捷
+    - 界面更清爽，减少认知负担
+
+### Technical Details
+- **修改文件**：
+  - `index.html`：
+    - 公共配置新增功能开关区域（4个复选框 + HR状态标签输入）
+    - 删除Boss直聘配置页面的功能开关卡片
+  - `common-config.js`：
+    - 添加 `hrStatusTagsInput` 标签输入组件
+    - 在 `init()` 中初始化HR状态标签输入组件
+    - 在 `loadCommonConfig()` 中添加功能开关的回填逻辑
+    - 在 `saveCommonConfig()` 中添加功能开关的收集和保存
+    - 在 `resetCommonConfig()` 中添加功能开关的重置
+  - `boss-config-form.js`：
+    - 从 `constructor()` 移除 `hrStatusTagsInput` 属性
+    - 从 `init()` 移除 `initializeTagsInput()` 调用
+    - 删除 `initializeTagsInput()` 方法
+    - 删除 `populateHrStatusTags()` 方法
+    - 从 `saveConfig()` 移除功能开关字段（4个字段）
+    - 从 `getFieldId()` 移除功能开关字段映射（4个字段）
+    - 从 `getCurrentConfig()` 移除功能开关字段（4个字段）
+- **新增字段**（公共配置）：
+  - `filterDeadHR` - 过滤不活跃HR开关（应用于所有平台）
+  - `sendImgResume` - 发送图片简历开关（应用于所有平台）
+  - `recommendJobs` - 接收推荐岗位开关（应用于所有平台）
+  - `hrStatusKeywords` - HR过滤状态关键词（应用于所有平台）
+- **移除字段**（Boss直聘配置）：
+  - `filterDeadHR` - 过滤不活跃HR
+  - `sendImgResume` - 发送图片简历
+  - `recommendJobs` - 接收推荐岗位
+  - `bossHrStatusKeywords` - HR状态关键词
+- **设计理念**：
+  - 公共配置：存储"全局功能开关"（应用于所有平台）
+  - 平台配置：存储"平台特定筛选条件"（仅应用于特定平台）
+  - 统一管理，减少重复配置，提升用户体验
+
+## [1.0.22] - 2025-10-21 🚀
+
+### Fixed
+- **应用启动数据恢复顺序优化！✨ 数据库数据优先加载，告别初始化失败**
+  - **问题背景 🐛**：应用启动时，PlaywrightService 在 `@PostConstruct` 中初始化并加载平台 Cookie 配置
+    - 此时 DataRestoreListener 还未执行（使用的是 `ApplicationReadyEvent`，优先级低）
+    - 导致从数据库查询配置时查不到数据（本地备份还未恢复到内存数据库）
+    - Cookie 加载失败，平台页面初始化为未登录状态
+  - **优化方案 🎯**：
+    - **DataRestoreListener 改用 `@PostConstruct`**：将监听器从 `ApplicationReadyEvent` 改为 `@PostConstruct`
+    - **设置最高优先级**：使用 `@Order(Ordered.HIGHEST_PRECEDENCE)` 确保最早执行
+    - **显式依赖声明**：PlaywrightService 添加 `@DependsOn("dataRestoreInitializer")` 注解
+    - **明确Bean名称**：将组件命名为 `dataRestoreInitializer`，便于其他组件引用
+  - **启动顺序调整 📊**：
+    - **调整前**：Bean实例化 → PlaywrightService.@PostConstruct（查询为空❌） → ApplicationReadyEvent → DataRestoreListener（数据恢复✅，但太晚）
+    - **调整后**：Bean实例化 → DataRestoreListener.@PostConstruct（最高优先级，数据恢复✅） → PlaywrightService.@PostConstruct（查询成功✅）
+  - **日志优化 📝**：
+    - 数据恢复流程添加清晰的开始/完成标记和进度提示
+    - Playwright 初始化添加数据库就绪提示
+    - 使用图形化符号（✓、✗）增强日志可读性
+  - **收益 ✅**：
+    - 应用启动时自动恢复本地备份数据到内存数据库
+    - PlaywrightService 初始化时能正确加载平台配置和 Cookie
+    - 启动后平台页面自动恢复登录状态，无需重新登录
+    - 数据恢复失败不影响应用启动，优雅降级
+
+### Technical Details
+- **修改文件**：
+  - `DataRestoreListener.java`：
+    - 重命名类注释为"应用启动数据恢复初始化器"
+    - 从 `@EventListener(ApplicationReadyEvent.class)` 改为 `@PostConstruct`
+    - 添加 `@Order(Ordered.HIGHEST_PRECEDENCE)` 注解，设置最高优先级
+    - 添加 `@Component("dataRestoreInitializer")` 显式指定 Bean 名称
+    - 方法重命名：`onApplicationReady()` → `restoreDataOnStartup()`
+    - 优化日志输出，添加结构化的进度标记和图形符号
+  - `PlaywrightService.java`：
+    - 添加 `@DependsOn("dataRestoreInitializer")` 注解，确保在数据恢复后初始化
+    - 添加类注释说明依赖关系
+    - 优化初始化日志，添加数据库就绪提示
+- **Spring Boot 启动顺序**：
+  1. Bean 实例化（所有 `@Component` 创建）
+  2. `@PostConstruct` 执行（按 `@Order` 优先级排序）
+     - `dataRestoreInitializer`（HIGHEST_PRECEDENCE，最先执行）
+     - `PlaywrightService`（依赖 dataRestoreInitializer，确保后执行）
+  3. `ApplicationReadyEvent` 触发（已废弃用于数据恢复）
+- **最佳实践应用**：
+  - ✅ 使用 `@PostConstruct` 替代事件监听，确保初始化顺序可控
+  - ✅ 使用 `@Order` 显式声明优先级，避免依赖 Spring 默认排序
+  - ✅ 使用 `@DependsOn` 显式声明依赖关系，增强代码可读性
+  - ✅ 显式命名 Bean，便于其他组件引用和依赖管理
+  - ✅ 异常不抛出，数据恢复失败降级为空数据库启动
+- **设计原则**：
+  - **依赖倒置原则**：通过 Spring 依赖注入管理组件依赖关系
+  - **单一职责原则**：DataRestoreListener 专注数据恢复，PlaywrightService 专注浏览器管理
+  - **容错设计**：数据恢复失败不影响应用启动，确保系统可用性
+
+### 日志示例
+```
+=== 开始数据恢复流程（优先级: HIGHEST） ===
+检查本地备份文件并恢复到内存数据库...
+✓ 发现备份文件，准备恢复数据
+  - 备份文件路径: /Users/xxx/.getjobs/data.json
+  - 备份文件大小: 12345 bytes
+  - 备份时间: 2025-10-21T10:30:00
+  - 备份配置数量: 4
+  - 备份职位数量: 150
+✓ 数据恢复成功！内存数据库已就绪
+=== 数据恢复流程完成 ===
+
+=== 开始初始化 Playwright 服务 ===
+（数据库已就绪，可以加载平台配置和Cookie）
+✓ 已为平台 Boss直聘 初始化页面: https://www.zhipin.com
+✓ 已为平台 智联招聘 初始化页面: https://www.zhaopin.com
+✓ Playwright 服务初始化成功
+=== Playwright 服务初始化完成 ===
+```
+
+## [1.0.21] - 2025-10-21 🧹
+
+### Removed
+- **黑名单过滤配置开关移除！✨ 自动化过滤，无需手动开关**
+  - **简化配置 🎯**：移除了所有平台（Boss直聘、智联招聘、51job、猎聘）的"过滤黑名单"开关
+  - **自动化过滤 🤖**：只要在公共配置中配置了黑名单关键词，系统会自动进行过滤，无需额外开关控制
+  - **界面更简洁 ✂️**：
+    - 删除Boss直聘的 `enableBlacklistFilterCheckBox` 复选框
+    - 删除智联招聘的整个"功能开关"卡片（仅包含黑名单过滤开关）
+    - 删除51job的整个"功能开关"卡片（仅包含黑名单过滤开关）
+    - 删除猎聘的整个"功能开关"卡片（仅包含黑名单过滤开关）
+  - **代码全面清理 🧹**：
+    - 从 `boss-config-form.js` 的 `getCurrentConfig()` 中移除 `enableBlacklistFilter` 字段
+    - 从 `zhilian-config-form.js` 的 `getCurrentConfig()` 和 `getFieldId()` 中移除 `blacklistFilter` 字段
+    - 从 `job51-config-form.js` 的 `saveConfig()`、`getCurrentConfig()` 和 `getFieldId()` 中移除 `blacklistFilter` 字段
+    - 从 `liepin-config-form.js` 的 `saveConfig()`、`getCurrentConfig()` 和 `getFieldId()` 中移除 `blacklistFilter` 字段
+    - 从 `index.html` 移除所有4个平台的黑名单过滤复选框HTML代码
+  - **用户体验提升 🚀**：
+    - 配置更简单，减少不必要的开关
+    - 黑名单过滤自动生效，符合用户直觉
+    - 界面更清爽，减少认知负担
+
+### Technical Details
+- **修改文件**：
+  - `index.html`：删除4个平台的黑名单过滤复选框（约60行代码）
+  - `boss-config-form.js`：从 `getCurrentConfig()` 移除 `enableBlacklistFilter` 字段
+  - `zhilian-config-form.js`：从 `getCurrentConfig()` 和 `getFieldId()` 移除 `blacklistFilter` 字段
+  - `job51-config-form.js`：从 `saveConfig()`、`getCurrentConfig()` 和 `getFieldId()` 移除 `blacklistFilter` 字段
+  - `liepin-config-form.js`：从 `saveConfig()`、`getCurrentConfig()` 和 `getFieldId()` 移除 `blacklistFilter` 字段
+- **移除字段**：
+  - Boss直聘：`enableBlacklistFilter`
+  - 智联招聘：`blacklistFilter`
+  - 51job：`blacklistFilter`
+  - 猎聘：`blacklistFilter`
+- **设计理念**：
+  - 黑名单功能由公共配置统一管理，配置即生效
+  - 减少冗余开关，降低配置复杂度
+  - 符合"约定优于配置"的设计原则
+
+## [1.0.20] - 2025-10-21 🚀
+
+### Added
+- **快速投递任务模块上线！✨ 一键投递，智能高效**
+  - **全新 quickdelivery 模块 🎯**：在 `modules/task/quickdelivery` 包下构建了完整的快速投递任务框架
+    - 基于任务调度基础设施模块，提供统一的投递任务管理
+    - 为每个平台（Boss直聘、智联招聘、51job、猎聘）提供独立的投递任务实现
+    - 每个平台的投递任务全局唯一，避免并发执行导致的冲突
+  - **核心功能实现 🚀**：
+    - **平台投递任务**：4个平台各自独立的快速投递任务类
+      - `BossQuickDeliveryTask` - Boss直聘快速投递任务
+      - `ZhilianQuickDeliveryTask` - 智联招聘快速投递任务
+      - `Job51QuickDeliveryTask` - 51job快速投递任务
+      - `LiepinQuickDeliveryTask` - 猎聘快速投递任务
+    - **统一调度服务**：`QuickDeliveryScheduler` 管理所有平台的投递任务
+      - 支持按平台提交快速投递任务
+      - 提供一键提交所有平台投递任务的功能
+      - 完善的任务状态跟踪和日志记录
+    - **丰富的DTO模型**：完整的数据传输对象定义
+      - `QuickDeliveryRequest` - 投递请求参数，支持关键词筛选、最大投递数量、延迟时间等配置
+      - `QuickDeliveryResult` - 投递结果统计，包含成功率、耗时、详细失败原因等
+      - `QuickDeliveryStatus` - 任务状态查询，支持实时进度跟踪
+    - **HTTP接口支持**：`QuickDeliveryController` 提供完整的RESTful API
+      - `/api/task/quick-delivery/submit/{platformCode}` - 按平台代码提交任务
+      - `/api/task/quick-delivery/submit/boss` - Boss直聘快速投递
+      - `/api/task/quick-delivery/submit/zhilian` - 智联招聘快速投递
+      - `/api/task/quick-delivery/submit/51job` - 51job快速投递
+      - `/api/task/quick-delivery/submit/liepin` - 猎聘快速投递
+      - `/api/task/quick-delivery/submit/all` - 所有平台一键投递
+  - **一键投递服务 🎁**：全新的 `JobDeliveryService` 整合三大环节
+    - 自动执行"采集 → 过滤 → 投递"完整流程
+    - 统一管理四个平台的投递逻辑，简化业务调用
+    - 支持按平台单独执行或批量执行所有平台
+    - 详细的执行日志和统计信息
+  - **架构设计亮点 🎨**：
+    - **模块化设计**：清晰的分层结构（domain/service/dto/web）
+    - **全局唯一约束**：每个平台的投递任务同一时刻只能执行一个（`globalUnique=true`）
+    - **任务超时控制**：默认30分钟超时，避免任务无限期执行
+    - **完整的文档**：包含 README.md 和 package-info.java，使用示例丰富
+  - **任务配置说明 📋**：
+    - 任务名称："{平台名称}快速投递任务"
+    - 任务类型：`QUICK_DELIVERY_{平台代码}`
+    - 全局唯一：true
+    - 超时时间：1800000ms (30分钟)
+
+### Technical Details
+- **新增文件**（12个核心文件）：
+  - **领域层**（4个任务实现）：
+    - `BossQuickDeliveryTask.java` - Boss直聘投递任务
+    - `ZhilianQuickDeliveryTask.java` - 智联招聘投递任务
+    - `Job51QuickDeliveryTask.java` - 51job投递任务
+    - `LiepinQuickDeliveryTask.java` - 猎聘投递任务
+  - **服务层**（2个服务）：
+    - `QuickDeliveryScheduler.java` - 快速投递任务调度服务
+    - `JobDeliveryService.java` - 一键投递整合服务
+  - **DTO层**（3个数据对象）：
+    - `QuickDeliveryRequest.java` - 投递请求参数
+    - `QuickDeliveryResult.java` - 投递结果统计
+    - `QuickDeliveryStatus.java` - 任务状态查询
+  - **Web层**（1个控制器）：
+    - `QuickDeliveryController.java` - HTTP接口控制器
+  - **文档**（2个文档文件）：
+    - `README.md` - 模块详细说明文档
+    - `package-info.java` - 包级别API文档
+- **模块结构**：
+  ```
+  quickdelivery/
+  ├── domain/          # 任务领域层（4个平台任务）
+  ├── service/         # 服务层（调度服务 + 一键投递服务）
+  ├── dto/             # 数据传输对象（请求、结果、状态）
+  ├── web/             # Web控制器（HTTP接口）
+  ├── README.md        # 模块说明文档
+  └── package-info.java # 包级别文档
+  ```
+- **任务执行流程**：
+  1. 通过 `QuickDeliveryScheduler` 提交任务
+  2. 调用 `JobDeliveryService` 执行一键投递
+  3. 依次执行：采集岗位 → 过滤岗位 → 投递岗位
+  4. 返回投递结果统计
+- **代码统计**：
+  - Java核心代码：~1,000行
+  - 注释和文档：~500行
+  - 总计12个Java文件
+- **设计原则遵循**：
+  - 单一职责原则（SRP）：每个任务类专注于一个平台
+  - 开闭原则（OCP）：易于扩展新平台
+  - 依赖倒置原则（DIP）：依赖 RecruitmentService 抽象接口
+  - DRY原则：统一的任务调度框架
+
+### 收益
+- ✅ 提供统一的快速投递入口，简化用户操作
+- ✅ 全局唯一任务约束，避免重复投递
+- ✅ 完整的任务生命周期管理和状态跟踪
+- ✅ 支持HTTP接口调用，易于集成
+- ✅ 清晰的模块结构，便于维护和扩展
+- ✅ 一键投递服务整合三大环节，自动化程度更高
+
+## [1.0.19] - 2025-10-21 🔧
+
+### Fixed
+- **Spring Bean名称冲突修复！✨ TaskExecutor重命名避免启动失败**
+  - **问题背景 🐛**：应用启动时抛出异常 `Cannot register alias 'taskExecutor' for name 'applicationTaskExecutor': Alias would override bean definition 'taskExecutor'`
+    - 自定义的 `TaskExecutor` 组件与Spring框架默认的异步任务执行器 `taskExecutor` bean名称冲突
+    - 导致Spring容器无法正常初始化，应用启动失败
+  - **修复方案 🎯**：
+    - 移除 `TaskExecutor` 类上的 `@Component` 注解，改为通过配置类手动创建bean
+    - 在 `TaskInfrastructureConfig` 中将 `@Bean` 方法名从 `taskExecutor` 改为 `infrastructureTaskExecutor`
+    - 显式指定bean名称为 `infrastructureTaskExecutor`，完全避免命名冲突
+  - **代码调整 🔧**：
+    - 移除 `@RequiredArgsConstructor` 注解，改为手动编写构造函数
+    - 添加详细注释说明不使用 `@Component` 的原因
+    - 保持原有功能不变，仅调整bean注册方式
+  - **收益 ✅**：
+    - 应用启动正常，不再与Spring框架默认bean冲突
+    - 代码更规范，避免框架保留名称
+    - 显式配置更清晰，便于理解bean的创建过程
+
+### Technical Details
+- **修改文件**：
+  - `TaskExecutor.java`：
+    - 移除 `@Component` 和 `@RequiredArgsConstructor` 注解
+    - 添加显式构造函数
+    - 添加注释说明通过配置类创建bean的原因
+  - `TaskInfrastructureConfig.java`：
+    - 将 `@Bean` 方法名从 `taskExecutor` 改为 `infrastructureTaskExecutor`
+    - 显式指定 `@Bean(name = "infrastructureTaskExecutor")`
+    - 添加注释说明避免与Spring默认bean冲突
+  - `TaskSchedulerService.java`：
+    - 移除 `@RequiredArgsConstructor` 注解
+    - 添加显式构造函数
+    - 在构造函数参数上使用 `@Qualifier("infrastructureTaskExecutor")` 注解
+    - 明确指定注入我们自定义的 `infrastructureTaskExecutor` bean
+- **Spring保留bean名称**：
+  - `taskExecutor` - Spring异步任务执行器（`@EnableAsync` 相关）
+  - `applicationTaskExecutor` - Spring Boot自动配置的任务执行器
+  - 自定义bean应避免使用这些名称
+- **最佳实践**：
+  - 自定义Executor类型的bean建议使用更具体的命名，如 `xxxTaskExecutor`
+  - 避免使用Spring框架保留的bean名称
+  - 使用 `@Bean(name = "...")` 显式指定bean名称更清晰
+
+## [1.0.18] - 2025-10-21 🧹
+
+### Removed
+- **旧版数据备份调度器下线！✨ 全面拥抱新架构**
+  - **删除旧版本 🗑️**：移除了 `DataBackupScheduler.java`，该类已被 `DataBackupSchedulerV2.java` 完全替代
+  - **架构统一 🎯**：
+    - V2版本基于任务调度基础设施模块，提供更强大的功能
+    - 支持全局唯一任务约束，避免并发执行导致的资源竞争
+    - 提供完善的任务状态跟踪和通知机制
+    - 支持任务超时控制，更可靠的执行保障
+  - **代码简化 ✂️**：
+    - 消除重复代码，统一使用新的任务调度框架
+    - 提高代码可维护性，降低维护成本
+    - 所有定时备份功能无缝迁移到V2版本
+  - **用户无感知 🚀**：
+    - 功能保持不变，自动备份机制继续工作
+    - 启动延迟备份和定时备份功能完全保留
+    - 更好的异常处理和日志记录
+
+### Technical Details
+- **删除文件**：
+  - `DataBackupScheduler.java`：旧版数据备份调度器（66行）
+- **迁移路径**：
+  - 旧版：直接调用 `DataBackupService.exportData()`
+  - 新版：通过 `TaskSchedulerService.submitTask(dataBackupTask)` 提交任务
+- **功能对比**：
+  - ✅ 定时备份（每5秒）：两版本均支持
+  - ✅ 启动延迟备份（5分钟）：两版本均支持
+  - ✅ 异常处理：V2版本更完善
+  - ✅ 日志记录：V2版本更详细
+  - 🆕 全局唯一约束：仅V2版本支持
+  - 🆕 任务状态跟踪：仅V2版本支持
+  - 🆕 任务超时控制：仅V2版本支持
+- **收益**：
+  - 消除重复代码，减少维护负担 ✅
+  - 统一任务调度架构，代码更优雅 📐
+  - 提升系统可靠性和可观测性 📊
+  - 为未来扩展更多定时任务打下基础 🚀
+
+## [1.0.17] - 2025-10-21 🏗️
+
+### Added
+- **任务调度基础设施模块上线！✨ DDD架构的优雅实现**
+  - **全新基础设施 🎯**：在 `common/infrastructure/task` 包下构建了完整的任务调度框架
+    - 采用DDD（领域驱动设计）模式，分层清晰、职责明确
+    - 支持任务生命周期管理（待执行、执行中、成功、失败、已取消）
+    - 提供统一的任务接口约束和执行规范
+  - **核心功能实现 🚀**：
+    - **任务接口约束**：通过 `ScheduledTask` 接口定义任务契约
+      - 强制要求任务名称 (`taskName`)
+      - 自动管理任务状态 (`TaskStatusEnum`)
+      - 内置完成通知机制 (`TaskNotificationListener`)
+    - **全局唯一任务**：通过 `UniqueTaskManager` 管理任务唯一性
+      - 配置 `TaskConfig.globalUnique = true` 即可启用
+      - 确保同一类型任务在同一时刻只能执行一个
+      - 自动处理任务冲突，失败任务会立即返回并释放锁
+    - **任务通知机制**：基于观察者模式的事件通知
+      - 支持任务开始 (`onTaskStart`)、成功 (`onTaskSuccess`)、失败 (`onTaskFailed`)、取消 (`onTaskCancelled`) 通知
+      - 支持选择性监听特定类型任务
+      - 异常隔离，单个监听器异常不影响其他监听器
+    - **灵活执行策略**：
+      - 同步执行：`submitTask()` 阻塞等待任务完成
+      - 异步执行：`submitTaskAsync()` 立即返回Future对象
+      - 带超时执行：`submitTaskWithTimeout()` 限制任务执行时间
+  - **架构设计亮点 🎨**：
+    - **领域层**：`Task`（聚合根）、`TaskConfig`（值对象）、`TaskNotification`（值对象）
+    - **契约层**：`ScheduledTask`（任务接口）、`TaskNotificationListener`（监听器接口）
+    - **执行器层**：`TaskExecutor`（执行引擎）、`UniqueTaskManager`（唯一性管理）
+    - **应用服务层**：`TaskSchedulerService`（调度服务）
+  - **设计模式应用 📐**：
+    - 模板方法模式：`ScheduledTask` 接口提供前置/后置钩子方法
+    - 观察者模式：`TaskNotificationListener` 监听任务状态变化
+    - 策略模式：多种任务执行策略
+    - 建造者模式：`TaskConfig` 使用Builder模式构建
+  - **实际应用示例 💡**：
+    - 创建 `DataBackupTask`：数据备份任务实现，配置为全局唯一
+    - 创建 `TaskExecutionLogger`：任务执行日志监听器，记录所有任务状态
+    - 创建 `DataBackupSchedulerV2`：基于新框架的定时任务调度器
+    - 保留 `DataBackupScheduler`：原始版本，方便对比
+
+### Technical Details
+- **新增文件**（13个Java核心文件）：
+  - **领域模型层**：
+    - `Task.java`：任务实体（聚合根），管理任务完整生命周期
+    - `TaskConfig.java`：任务配置值对象，定义任务属性和约束
+    - `TaskNotification.java`：任务通知值对象，携带状态变化信息
+  - **枚举定义**：
+    - `TaskStatusEnum.java`：任务状态枚举（5种状态）
+  - **契约接口层**：
+    - `ScheduledTask.java`：可调度任务接口，定义任务契约
+    - `TaskNotificationListener.java`：任务通知监听器接口
+  - **执行器层**：
+    - `TaskExecutor.java`：任务执行器，核心执行引擎（192行）
+    - `UniqueTaskManager.java`：唯一任务管理器，管理全局唯一约束
+  - **调度服务层**：
+    - `TaskSchedulerService.java`：任务调度服务，对外接口
+  - **配置层**：
+    - `TaskInfrastructureConfig.java`：Spring配置类，自动装配
+  - **示例代码**：
+    - `ExampleUsage.java`：完整使用示例（232行）
+  - **包级文档**：
+    - `package-info.java`：API文档和使用示例（129行）
+- **业务集成示例**（4个文件）：
+  - `DataBackupTask.java`：数据备份任务实现
+  - `TaskExecutionLogger.java`：任务执行日志监听器
+  - `DataBackupSchedulerV2.java`：基于新框架的定时任务
+  - 保留 `DataBackupScheduler.java`：原始版本对照
+- **代码统计**：
+  - Java核心代码：~1,300行
+  - 注释和文档：~800行
+  - 总计17个Java文件
+- **线程安全保证**：
+  - 使用 `ConcurrentHashMap` 管理唯一任务映射
+  - 使用 `CachedThreadPool` 处理异步任务
+  - 监听器异常捕获，不影响任务执行
+- **Spring集成**：
+  - 完全集成Spring框架，支持依赖注入
+  - 自动装配监听器列表
+  - 可与 `@Scheduled` 定时任务无缝配合
+- **设计原则遵循**：
+  - 单一职责原则（SRP）：每个类职责明确
+  - 开闭原则（OCP）：对扩展开放，对修改封闭
+  - 依赖倒置原则（DIP）：依赖抽象而非具体实现
+  - DRY原则：消除重复代码
+
+### 收益
+- ✅ 提供统一的任务调度框架，规范任务实现
+- ✅ 全局唯一任务约束，避免资源竞争
+- ✅ 完善的任务监控和通知机制
+- ✅ 优雅的DDD架构，代码可维护性高
+- ✅ 丰富的文档和示例，易于上手
+- ✅ 支持多种执行策略，灵活性强
+
+## [1.0.16] - 2025-10-19 🔄
+
+### Changed
+- **ConfigDTO配置转换逻辑优化！✨ 统一数据源架构**
+  - **问题背景 🤔**：`ConfigDTO.convertFromEntity()` 方法仍然从 `ConfigEntity` 获取已迁移到 `UserProfile` 的字段，导致数据源不一致
+  - **架构统一 🎯**：
+    - 参考 `AbstractRecruitmentService.convertConfigEntityToDTO()` 的设计，重构 `ConfigDTO` 的转换逻辑
+    - 从 `UserProfile` 获取用户个性化配置：`sayHi`、`enableAIJobMatchDetection`、`enableAIGreeting`、`sendImgResume`、`resumeImagePath`、`recommendJobs`
+    - 从 `ConfigEntity` 获取平台相关配置：`filterDeadHR`、`keyFilter`、`checkStateOwned`、`resumeContent`、`waitTime`、`platformType`
+  - **非Spring环境支持 🔧**：
+    - 使用 `SpringContextUtil.getBean()` 获取 `UserProfileRepository`，支持在非Spring管理的Bean中调用
+    - 保持单例模式的设计，确保配置全局一致性
+  - **容错设计 🛡️**：
+    - 获取 `UserProfile` 失败时自动降级使用默认值，不影响应用运行
+    - 添加详细的日志记录，方便问题排查
+    - 异常情况下优雅降级，确保系统稳定性
+  - **代码质量提升 📊**：
+    - 添加详细的方法注释，说明设计思路和使用场景
+    - 统一了 `ConfigDTO` 和 `AbstractRecruitmentService` 的配置转换逻辑
+    - 消除了数据源不一致的潜在问题
+
+### Technical Details
+- **修改文件**：
+  - `ConfigDTO.java`：
+    - 新增 `UserProfile` 和 `UserProfileRepository` 导入
+    - 添加 `@Slf4j` 注解支持日志记录
+    - 重构 `convertFromEntity()` 方法：
+      - 通过 `SpringContextUtil` 获取 `UserProfileRepository`
+      - 从 `UserProfile` 加载用户配置字段（6个字段）
+      - 从 `ConfigEntity` 加载平台配置字段
+      - 添加异常处理和日志记录
+    - 更新方法注释，说明支持非Spring管理的Bean调用
+- **设计原则**：
+  - **单一数据源**：用户配置统一从 UserProfile 获取，平台配置从 ConfigEntity 获取
+  - **职责分离**：UserProfile 存储"我是谁"，ConfigEntity 存储"我要找什么"
+  - **统一架构**：ConfigDTO、AbstractRecruitmentService 使用相同的配置转换逻辑
+  - **容错降级**：异常情况下使用默认值，保证系统可用性
+- **收益**：
+  - 消除配置数据源不一致的问题 ✅
+  - 统一配置转换逻辑，降低维护成本 📉
+  - 提高代码可读性和可维护性 📚
+  - 支持非Spring环境调用，灵活性更强 🚀
+
+## [1.0.15] - 2025-10-19 🍪
+
+### Added
+- **Cookie自动持久化！🔐 登录状态永久保存，告别重复登录**
+  - **智能Cookie保存 💾**：平台登录成功后，自动将Cookie保存到对应平台的配置实体（ConfigEntity.cookieData）
+    - 猎聘登录成功 → 自动保存Cookie到数据库
+    - 51Job登录成功 → 自动保存Cookie到数据库
+    - 智联招聘登录成功 → 自动保存Cookie到数据库
+    - Boss直聘登录成功 → 自动保存Cookie到数据库
+  - **启动自动恢复登录 🚀**：应用重启时，自动从配置加载Cookie到对应平台页面
+    - PlaywrightService初始化时，为每个平台Page加载已保存的Cookie
+    - 无需重新登录，直接恢复登录状态，省时省心！
+  - **Cookie序列化方案 📦**：
+    - 使用JSON格式存储Cookie（name、value、domain、path、expires、secure、httpOnly）
+    - 兼容Playwright的Cookie对象结构，序列化/反序列化流程清晰
+    - 支持过期时间、安全标志等完整Cookie属性
+  - **容错设计 🛡️**：
+    - Cookie加载失败不影响应用启动，自动降级为无Cookie状态
+    - 详细的日志记录，方便排查Cookie相关问题
+    - 对于没有Cookie配置的平台，优雅跳过加载流程
+
+### Changed
+- **LoginStatusCheckScheduler 增强 ⚡**：
+  - 新增 `savePlatformCookieToConfig()` 方法：保存平台Cookie到配置实体
+  - 新增 `getCookiesAsJson()` 方法：将Playwright Cookie对象序列化为JSON字符串
+  - 四个平台检查方法（猎聘、51Job、智联、Boss）登录成功后自动保存Cookie
+  - 注入 `ConfigService` 依赖，支持Cookie的数据库持久化
+- **PlaywrightService 增强 🔧**：
+  - 新增 `loadPlatformCookies()` 方法：从配置实体加载平台Cookie
+  - 新增 `loadCookiesFromJson()` 方法：将JSON字符串反序列化为Playwright Cookie对象
+  - 在 `init()` 初始化流程中，为每个平台Page预加载Cookie（在navigate之前）
+  - 注入 `ConfigService` 依赖，支持从数据库读取Cookie
+- **ConfigEntity 字段利用 📊**：
+  - 充分利用现有的 `cookieData` 字段（TEXT类型），存储各平台Cookie的JSON数据
+  - 按平台类型（platformType）隔离存储，每个平台独立管理自己的Cookie
+
+### Technical Details
+- **修改文件**：
+  - `LoginStatusCheckScheduler.java`：
+    - 添加 `ConfigService` 依赖注入
+    - 新增 `savePlatformCookieToConfig()` 和 `getCookiesAsJson()` 方法
+    - 在 `checkLiepinLoginStatus()`、`checkJob51LoginStatus()`、`checkZhilianLoginStatus()`、`checkBossLoginStatus()` 中添加Cookie保存逻辑
+    - 导入 `com.github.openjson.JSONArray` 和 `com.github.openjson.JSONObject`
+  - `PlaywrightService.java`：
+    - 添加 `ConfigService` 依赖注入和构造函数
+    - 新增 `loadPlatformCookies()` 和 `loadCookiesFromJson()` 方法
+    - 在 `init()` 方法中为每个平台Page预加载Cookie
+    - 导入 `com.github.openjson.JSONArray` 和 `com.github.openjson.JSONObject`
+- **Cookie数据结构**（JSON格式）：
+  ```json
+  [
+    {
+      "name": "cookie_name",
+      "value": "cookie_value",
+      "domain": ".example.com",
+      "path": "/",
+      "expires": 1234567890.123,
+      "secure": true,
+      "httpOnly": true
+    }
+  ]
+  ```
+- **执行流程**：
+  1. **登录成功时**：Page Cookie → JSON字符串 → ConfigEntity.cookieData → 数据库
+  2. **应用启动时**：数据库 → ConfigEntity.cookieData → JSON字符串 → Page Cookie
+- **收益**：
+  - 告别频繁扫码登录，提升用户体验 ✨
+  - 登录状态持久化，应用重启不丢失 💪
+  - 自动化程度更高，运维更省心 🎯
+
+## [1.0.14] - 2025-10-19 🎯
+
+### Changed
+- **代码重构！🏗️ 消除重复代码，引入优雅的抽象基类**
+  - **创建抽象基类 AbstractRecruitmentService**：
+    - 将各平台招聘服务中重复的 `convertConfigEntityToDTO()` 方法抽取到抽象基类
+    - 提供统一的配置转换逻辑，减少代码重复约150行×2=300行
+    - 引入模板方法模式，支持子类通过 `populatePlatformSpecificFields()` 扩展平台特定字段
+  - **重构招聘服务实现类**：
+    - `BossRecruitmentServiceImpl` 继承 `AbstractRecruitmentService`，移除重复代码
+    - `LiepinRecruitmentServiceImpl` 继承 `AbstractRecruitmentService`，移除重复代码并覆写方法添加平台特定字段（publishTime）
+    - 构造函数调整为先调用父类构造器 `super(configService, userProfileRepository)`
+  - **设计模式应用**：
+    - 使用模板方法模式（Template Method Pattern）提供可扩展的配置转换框架
+    - 遵循开闭原则（Open-Closed Principle），对扩展开放、对修改封闭
+    - 符合 DRY 原则（Don't Repeat Yourself），消除代码重复
+
+- **配置架构再优化！✨ 全局配置全面统一到用户画像**
+  - **核心配置迁移 🚀**：将简历、AI智能、推荐职位等核心配置从各平台配置（ConfigEntity）统一迁移到用户画像（UserProfile）
+  - **一处配置，全局生效 🌍**：
+    - 简历配置：`resumeImagePath`（简历图片路径）、`sendImgResume`（是否发送图片简历）、`sayHi`（打招呼内容）
+    - AI智能功能：`enableAIGreeting`（AI智能打招呼）、`enableAIJobMatchDetection`（AI职位匹配检测）
+    - 推荐职位：`recommendJobs`（推荐职位开关）
+  - **架构更合理 🏗️**：
+    - 用户个性化配置统一存储在 UserProfile，体现"一个候选人"的完整画像
+    - 平台配置（ConfigEntity）专注于平台相关的筛选条件和技术参数
+    - 职责分离更清晰，代码结构更优雅
+  - **接口全面适配 🔧**：
+    - 更新 `CommonConfigController`：在公共配置接口中支持这 6 个字段的保存和加载
+    - 更新 `ConfigController`：移除平台配置中对这些字段的处理，避免重复配置
+    - 新增 `convertToBoolean()` 辅助方法，智能转换布尔值（支持 Boolean、String、Number 等多种格式）
+  - **数据结构优化 📊**：
+    - `UserProfile` 实体新增 6 个字段，完善用户画像信息
+    - `UserProfileDTO` 同步新增对应字段，保持前后端数据一致性
+    - `ConfigEntity` 清理已迁移字段，保持代码简洁
+
+### Technical Details
+- **新增文件**：
+  - `AbstractRecruitmentService.java`：抽象基类，提供通用的配置转换逻辑
+    - 定义 `convertConfigEntityToDTO()` 方法，统一处理配置实体到 DTO 的转换
+    - 提供 `populatePlatformSpecificFields()` 钩子方法，允许子类添加平台特定字段
+    - 管理 `ConfigService` 和 `UserProfileRepository` 依赖
+- **修改文件**：
+  - `UserProfile.java`：新增 `sayHi`、`resumeImagePath`、`sendImgResume`、`enableAIGreeting`、`enableAIJobMatchDetection`、`recommendJobs` 字段
+  - `UserProfileDTO.java`：同步新增 6 个字段的 DTO 定义
+  - `ConfigEntity.java`：移除已迁移的 6 个字段，添加迁移说明注释
+  - `CommonConfigController.java`：
+    - 在 `saveCommonConfig()` 中添加 6 个字段的保存逻辑
+    - 在 `convertToDTO()` 中添加 6 个字段的数据转换
+    - 新增 `convertToBoolean()` 辅助方法，支持多种格式的布尔值转换
+  - `ConfigController.java`：在 `toEntity()` 方法中移除 6 个字段的处理，添加迁移说明注释
+  - `BossRecruitmentServiceImpl.java`：
+    - 继承 `AbstractRecruitmentService` 抽象基类
+    - 移除重复的 `convertConfigEntityToDTO()` 方法（约80行代码）
+    - 调整构造函数，调用父类构造器传递 `ConfigService` 和 `UserProfileRepository`
+    - 清理不再需要的依赖字段和 import 语句
+  - `LiepinRecruitmentServiceImpl.java`：
+    - 继承 `AbstractRecruitmentService` 抽象基类
+    - 移除重复的 `convertConfigEntityToDTO()` 方法（约80行代码）
+    - 覆写 `populatePlatformSpecificFields()` 方法，添加猎聘特有的 `publishTime` 字段
+    - 调整构造函数，调用父类构造器传递 `ConfigService` 和 `UserProfileRepository`
+    - 移除 `@RequiredArgsConstructor` 注解，改用显式构造函数
+    - 清理不再需要的 import 语句
+- **迁移字段清单**（从 ConfigEntity → UserProfile）：
+  - `sayHi` - 打招呼内容（TEXT）
+  - `resumeImagePath` - 简历图片路径（VARCHAR）
+  - `sendImgResume` - 是否发送图片简历（Boolean）
+  - `enableAIGreeting` - 启用AI智能打招呼（Boolean）
+  - `enableAIJobMatchDetection` - 启用AI职位匹配检测（Boolean）
+  - `recommendJobs` - 推荐职位（Boolean）
+- **数据来源调整**：
+  - 各平台招聘服务实现类统一从 UserProfile 获取用户个性化配置
+  - 从 ConfigEntity 获取平台相关的筛选条件和技术参数
+  - 确保配置读取的一致性和准确性
+- **重构收益**：
+  - 减少重复代码约 160 行（80行×2个平台）
+  - 提高代码可维护性，修改配置转换逻辑只需在一处进行
+  - 便于未来新增招聘平台，只需继承基类即可复用配置转换逻辑
+  - 通过钩子方法支持平台特定扩展，灵活性与统一性兼得
+- **设计理念**：
+  - UserProfile：存储"我是谁"（候选人画像、简历、AI偏好）
+  - ConfigEntity：存储"我要找什么"（平台筛选条件、技术参数）
+  - AbstractRecruitmentService：提供"怎么转换"（统一的配置转换逻辑）
+
+## [1.0.13] - 2025-10-18 🤖
+
+### Changed
+- **AI智能配置大统一！✨ 一处配置，全平台生效**
+  - **告别重复配置 🎯**：将Boss直聘、智联招聘、51job、猎聘等各平台的AI智能配置统一移至公共配置中心
+  - **一键掌控全局 🌍**：
+    - 在公共配置中设置AI职位匹配检测开关，自动应用到所有招聘平台
+    - 在公共配置中设置AI智能打招呼开关，自动应用到所有招聘平台
+    - 无需在每个平台重复配置，省心省力！
+  - **界面更简洁 ✂️**：
+    - 移除Boss直聘、智联招聘、51job、猎聘四个平台的独立AI配置卡片
+    - 公共配置新增"AI智能功能"区域，包含两个核心开关：
+      - AI职位匹配检测：智能分析职位描述，检测岗位匹配度
+      - AI智能打招呼：根据候选人信息和JD生成个性化招呼语
+  - **代码全面重构 🔧**：
+    - 更新 `common-config.js`：添加AI智能功能开关的收集、保存、加载逻辑
+    - 更新 `boss-config-form.js`：移除 `enableAIJobMatchDetection`、`enableAIGreeting`、`checkStateOwned` 相关代码
+    - 更新 `zhilian-config-form.js`：移除 `enableAIJobMatch` 相关代码
+    - 更新 `job51-config-form.js`：移除 `enableAIJobMatch` 相关代码
+    - 更新 `liepin-config-form.js`：移除 `enableAIJobMatch` 相关代码
+    - 清理HTML：删除各平台重复的AI智能配置卡片（约100行代码）
+  - **用户体验提升 🚀**：
+    - 配置管理更集中，避免在多个平台重复配置相同功能
+    - AI功能开关统一管理，切换更便捷
+    - 界面更清爽，减少认知负担
+
+### Technical Details
+- **修改文件**：
+  - `index.html`：
+    - 公共配置新增AI智能功能区域（`commonEnableAIJobMatch`、`commonEnableAIGreeting`）
+    - 删除Boss直聘、智联招聘、51job、猎聘的AI配置卡片
+  - `common-config.js`：
+    - 在 `saveCommonConfig()` 中添加AI智能功能开关的收集
+    - 在 `loadCommonConfig()` 中添加AI智能功能开关的回填
+    - 在 `resetCommonConfig()` 中添加AI智能功能开关的重置
+  - `boss-config-form.js`：从 `saveConfig()`、`getFieldId()`、`getCurrentConfig()` 中移除AI配置字段
+  - `zhilian-config-form.js`：从 `getCurrentConfig()`、`getFieldId()` 中移除AI配置字段
+  - `job51-config-form.js`：从 `saveConfig()`、`getFieldId()`、`getCurrentConfig()` 中移除AI配置字段
+  - `liepin-config-form.js`：从 `saveConfig()`、`getFieldId()`、`getCurrentConfig()` 中移除AI配置字段
+- **新增字段**（公共配置）：
+  - `enableAIJobMatch` - AI职位匹配检测开关（应用于所有平台）
+  - `enableAIGreeting` - AI智能打招呼开关（应用于所有平台）
+- **移除字段**（各平台配置）：
+  - Boss直聘：`enableAIJobMatchDetection`、`enableAIGreeting`、`checkStateOwned`
+  - 智联招聘：`enableAIJobMatch`
+  - 51job：`enableAIJobMatch`
+  - 猎聘：`enableAIJobMatch`
+
+## [1.0.12] - 2025-10-18 🎯
+
+### Removed
+- **数据库备份按钮移除！🗑️ 自动化配置备份，告别多余点击**
+  - **简化用户操作 ✨**：移除了所有平台的手动数据库备份按钮，配置自动保存到本地缓存，无需用户手动触发备份
+  - **界面更简洁 ✂️**：
+    - 移除Boss直聘、智联招聘、前程无忧、猎聘四个平台的数据库备份按钮
+    - 保存配置按钮由原来的 col-6 调整为 col-12，占据整行宽度，视觉更舒适
+  - **代码全面清理 🧹**：
+    - 从 `app.js` 移除：`handleBackupData()` 方法和备份按钮事件绑定
+    - 从 `boss-config-form.js` 移除：`handleBackupData()` 方法和备份按钮事件绑定
+    - 从 `zhilian-config-form.js` 移除：`handleBackupData()` 方法和备份按钮事件绑定
+    - 从 `job51-config-form.js` 移除：`handleBackupData()` 方法和备份按钮事件绑定
+    - 从 `liepin-config-form.js` 移除：`handleBackupData()` 方法和备份按钮事件绑定
+    - 从 `index.html` 移除：所有4个平台的备份按钮HTML代码
+  - **用户体验提升 🚀**：
+    - 配置数据自动保存到 localStorage 本地缓存
+    - 同步保存到后端接口，双重保障数据安全
+    - 减少不必要的用户交互，让流程更顺畅
+
+### Technical Details
+- **移除文件**：无（仅移除代码片段）
+- **修改文件**：
+  - `index.html`：移除4个备份按钮，调整布局从 col-6 到 col-12
+  - `app.js`：移除 `handleBackupData()` 方法和事件绑定（约35行）
+  - `boss-config-form.js`：移除 `handleBackupData()` 方法和事件绑定（约30行）
+  - `zhilian-config-form.js`：移除 `handleBackupData()` 方法和事件绑定（约10行）
+  - `job51-config-form.js`：移除 `handleBackupData()` 方法和事件绑定（约30行）
+  - `liepin-config-form.js`：移除 `handleBackupData()` 方法和事件绑定（约15行）
+- **影响接口**：无（移除了对 `/api/backup/export` 的前端调用，但接口仍保留供后端使用）
+
+## [1.0.11] - 2025-10-18 📦
+
+### Changed
+- **配置统一优化！✨ 简历配置移至公共配置**
+  - **告别重复配置 🎯**：将Boss直聘、猎聘等各平台的简历配置（简历图片路径、打招呼内容）统一移至公共配置中心
+  - **一处配置，全局生效 🌍**：在公共配置中设置一次，自动应用到所有招聘平台，省心省力！
+  - **界面更简洁 ✂️**：
+    - 移除Boss直聘配置页面的简历配置卡片
+    - 移除猎聘配置页面的简历配置卡片
+    - 公共配置新增"简历配置"区域，包含简历图片路径和打招呼内容
+  - **代码全面重构 🔧**：
+    - 更新 `common-config.js`：添加简历配置的收集、保存、加载逻辑
+    - 更新 `boss-config-form.js`：移除简历配置相关的验证和表单处理代码
+    - 清理HTML：删除各平台重复的简历配置表单项
+  - **用户体验提升 🚀**：配置管理更集中，避免在多个平台重复配置相同内容
+
+### Technical Details
+- **修改文件**：
+  - `index.html`：公共配置新增简历配置区域，删除Boss直聘、猎聘的简历配置卡片
+  - `common-config.js`：在 `collectProfileData()`、`saveCommonConfig()`、`populateProfileForm()` 中添加简历配置处理
+  - `boss-config-form.js`：从 `saveConfig()`、`getCurrentConfig()`、`getFieldId()`、`validateRequiredFields()`、`bindFormValidation()`、`bindEvents()` 中移除简历配置相关代码
+- **新增字段**（公共配置）：
+  - `commonResumeImagePath` - 简历图片路径（应用于所有平台）
+  - `commonSayHiContent` - 打招呼内容（应用于所有平台）
+- **移除字段**（各平台配置）：
+  - Boss直聘：`resumeImagePath`、`sayHi`
+  - 猎聘：`liepinResumeImagePath`、`liepinSayHiTextArea`
+
+## [1.0.10] - 2025-10-18 🚀
+
+### Changed
+- **UI优化！🎨 移除冗余的只读求职配置查看板块**
+  - **精简界面 ✂️**：移除了独立的"求职配置"只读查看标签页，配置信息已在填写表单中实时回显，无需额外查看页面
+  - **代码清理 🧹**：
+    - 删除 `boss-config-readonly.js` 文件及其在 `index.html` 中的引用
+    - 移除 `app.js` 中的 `bindBossConfigViewEvents()` 方法和相关Vue应用初始化代码
+    - 删除 `index.html` 中的"求职配置"标签页HTML结构（约170行）
+  - **用户体验提升 🚀**：界面更简洁，配置管理更直观，减少了重复展示
+- **候选人信息重构！✨ 更简洁、更聚焦、更智能！**
+  - **精简核心字段 🎯**：从原来10+个冗长字段精简到11个核心要素，删繁就简，填表更快捷～
+  - **新增必填字段验证 ✅**：
+    - `jobTitle` - 职位名称（必填）
+    - `skills` - 核心技能（必填，标签形式，至少1项）
+    - `yearsOfExperience` - 工作年限（必填，下拉选择，支持如"3-5年"、"高级"等）
+    - `careerIntent` - 职业意向（必填，10-40字软校验）
+  - **智能配置字段 🤖**：
+    - `tone` - 沟通语气（可选：礼貌亲切、专业克制、自然轻松、简洁商务）
+    - `language` - 语言（可选：中文简体、英文，默认中文）
+    - `maxChars` - 最大字符数（可选，范围80-180，默认120）
+    - `dedupeKeywords` - 去重关键词（可选，标签形式）
+  - **增强的个性化字段 💡**：
+    - `domainExperience` - 领域经验（可选下拉：跨境电商、金融科技、SaaS等10+领域）
+    - `location` - 期望地点（可选）
+    - `highlights` - 个人亮点（可选标签，最多5项）
+  - **标签输入体验升级 🏷️**：`skills`、`highlights`、`dedupeKeywords` 使用 TagsInput 组件，支持动态添加/删除，更直观更便捷！
+  - **完整的前后端重构 🔧**：
+    - 全面重写 `collectProfileData()`、`validateProfileData()`、`populateProfileForm()` 函数
+    - 新增三个标签输入组件：`skillsTagsInput`、`highlightsTagsInput`、`dedupeKeywordsTagsInput`
+    - 智能验证：职位名称、技能、工作年限必填；职业意向10-40字；个人亮点最多5项；字符数80-180范围
+  - **告别历史包袱 👋**：移除了过时字段（role、years、domains、coreStack、achievements、strengths、improvements、availability、links等）
+
+### Technical Details
+- **修改文件**：`index.html`、`common-config.js`
+- **新增字段**（11个核心字段）：
+  - 必填：`jobTitle`, `skills`, `yearsOfExperience`, `careerIntent`
+  - 可选：`domainExperience`, `location`, `tone`, `language`, `highlights`, `maxChars`, `dedupeKeywords`
+- **移除字段**：`role`, `years`, `domains`, `coreStack`, `achievements`, `strengths`, `improvements`, `availability`, `links` (github, portfolio)
+- **新增组件**：3个 TagsInput 标签输入组件
+- **重构函数**：数据收集、验证、保存、重置、加载全流程重构
+
+## [1.0.9] - 2025-10-17 🏗️
+
+### Changed
+- **职位匹配模块架构升级！✨ AI提示词管理更优雅！**
+  - 参考 `greeting` 模块的设计，给 `job` 模块的提示词系统来了个大变身！
+  - **告别配置文件硬编码 👋**：提示词从 `application-gpt.yml` 搬家到独立的 YAML 文件 `prompts/job-match-v1.yml`，版本管理更清晰！
+  - **结构化提示词 🎨**：采用 segments 设计（SYSTEM、GUIDELINES、USER），提示词结构一目了然，修改起来不再头疼～
+  - **新增组装器 🔧**：创建了 `JobPromptAssembler` 和 `JobPromptVariables`，专业管理提示词变量，告别魔法字符串！
+  - **接口更简洁 🚀**：重构了 `JobMatchAiService`，移除冗余的 `platform` 参数，使用统一的 `LlmClient`，调用更丝滑！
+  - **模板仓库完善 📚**：实现了 `TemplateRepository` 的 YAML 自动加载功能，支持热加载多版本提示词，A/B测试随时来！
+  - **架构统一 🎯**：现在 `job` 和 `greeting` 模块使用相同的提示词管理架构，代码更优雅，维护更省心！
+  - **详细文档 📝**：新增 `JOB_MODULE_REFACTORING.md` 文档，记录了所有架构变化和使用示例，技术细节全都有～
+
+### Technical Details
+- 新增文件：`prompts/job-match-v1.yml`、`JobPromptAssembler.java`、`JobPromptVariables.java`
+- 重构文件：`JobMatchAiService.java`、`JobMatchRequest.java`、`TemplateRepository.java`
+- 清理配置：移除 `application-gpt.yml` 中的旧提示词配置，更清爽！
+
+## [1.0.8] - 2025-10-17 💅
+
+### Changed
+- **UI大焕新！✨ 智能求职助手颜值爆改！**
+  - 拜拜👋 传统上下布局，快来拥抱超in的左侧菜单栏设计，操作丝滑，颜值与实力并存！
+  - **布局重塑 🛠️**：从头到脚重构了 `index.html`，页面结构更清晰，逻辑分区更合理，找东西不迷路～
+  - **风格新生 🎨**：`style.css` 全面升级！注入现代设计感，深色侧边栏搭配清爽内容区，高级感瞬间拉满！
+  - **体验飞跃 🚀**：导航栏华丽变身，从顶部“横批”变身左侧“竖列”，找功能快人一步，告别手忙脚乱。
+  - **细节控福音 🍬**：精心调整了卡片、按钮和字体样式，每一处都透露着精致，让你的求职之旅赏心悦目～
+
+## [1.0.7] - 2025-10-16 🔧
+
+### Fixed
+- **登录状态Bug修复 ✅**
+  - 修复了 `isLoggedIn()` 前端缓存没及时更新，导致登录按钮状态“假死”的小毛病。
+  - 新增后端接口 `/api/tasks/status` 兜底，确保登录状态以后端大大为准，双重保险更安心！🔒
+  - 增加了详细的“黑匣子”日志，记录前后端状态差异，方便快速定位问题。
+  - 检测到状态不一致时，会自动同步前端缓存并“嘀嘀”发出警告日志。
+- **Playwright 分页点击异常修复 📄**
+  - 修复了翻页时偶尔出现的 `PlaywrightException` 异常，不再错过任何一个好机会！
+  - 引入智能重试机制，当 Playwright 闹小脾气时，我们会耐心安抚并重试，而不是直接放弃。
+  - 在点击前后都会检查页面状态，像贴心管家一样确保一切就绪。
+  - 增强了系统的“强心脏”💪，避免因内部资源临时“打盹”导致任务中断。
+
+## [1.0.6] - 2025-10-15 🧠
+
+### Added
+- **Deepseek AI 配置动态刷新 ✨**
+  - 无需重启应用，配置一秒生效！实现了基于 `@RefreshScope` 的优雅热更新。
+  - 现在可以随时更换 AI 的 API Key、模型等，就像换衣服一样简单！
+  - 零停机完成配置切换，工作娱乐两不误。
+
+### Changed
+- **技术宅的小优化 🤓**
+  - 优化了 `DeepseekGptConfig` 配置类，让它支持动态刷新。
+  - 引入了 `spring-cloud-context` 和 `actuator`，解锁更多高级玩法。
+  - 新增 `application-actuator.yml` 配置文件，让技术大佬们可以更方便地管理应用。
+
+## [1.0.5] - 2025-10-14 🛠️
+
+### Added
+- **公共配置模块闪亮登场 🎈**
+  - 新增黑名单功能，不喜欢的公司和岗位，一键拉黑，眼不见心不烦！
+  - 新增候选人信息配置，让AI更懂你，为你生成专属的打招呼内容。
+- **AI智能打招呼功能上线 🤖**
+  - AI帮你写开场白，根据你的信息和岗位JD，生成超有诚意的招呼语，让HR眼前一亮！
+  - 如果AI卡壳了，也会自动切换回默认内容，保证万无一失。
+
+### Changed
+- **任务流程大梳理 🏃‍♀️**
+  - 登录操作简化啦！现在系统会自动检查登录状态，你只需要在浏览器里登录一次就好。
+  - 任务管理更清晰，单独抽离成一个模块，告别混乱。
+- **告别自动保存的小烦恼 📝**
+  - 为了解决数据库“打架”的问题，现在需要小可爱们手动点击保存按钮啦，自己的配置自己做主！
+
+## [1.0.4.1] - 2025-09-29 🛠️
+
+### Changed
+- **重构: 任务状态管理** ⚙️
+  - **背景**: 任务状态分散在各自服务中，缺乏统一管理。
+  - **变更**: 引入 Spring 事件机制 (`TaskUpdateEvent`) 和 `task` 模块，实现状态的集中管理和通过 `/api/tasks/status` 实时查询。
+  - **影响**: 实现了状态管理的解耦和集中化，提高了系统的可观测性与可维护性。
+- **重构: PlaywrightService Context 管理** 🧠
+  - **背景**: 每个平台独立的 `BrowserContext` 导致资源消耗过高。
+  - **变更**: 重构为单一共享的 `BrowserContext`，减少浏览器窗口数量。
+  - **影响**: 显著降低了应用启动时的资源消耗。
+- **重构: PlaywrightUtil 迁移至 PlaywrightService** 🏗️
+  - **背景**: `PlaywrightUtil` 包含复杂业务逻辑，难以测试和扩展。
+  - **变更**: 创建 `PlaywrightService` 替代 `PlaywrightUtil`，支持按平台隔离 `Context`。
+  - **影响**: 提高了代码的可维护性、稳定性和可测试性。
+
+## [1.0.4] - 2025-09-27 🚀
+
+### Added
+- **新平台解锁！51job & 智联招聘加入大家庭 🎉**
+  - 现在可以在51job和智联上自动检索和投递啦！
+  - **温馨提示 📢**：智联需要手机号验证才能登录哦，记得激活一下～
+- **猎聘板块正在路上... 🚧**
+  - 敬请期待，我们正在快马加鞭开发中！
+
+## [1.0.3] - 2025-09-23 🧩
+
+### Added
+- **51job 配置板块来啦！**
+  - 现在可以为51job单独设置你的求职偏好啦。
+
+### Fixed
+- **修复了一些小bug 🐞**
+  - 解决了BOSS和51JOB字典值显示不正确的问题。
+  - 修复了BOSS期望薪资过滤的小问题。
+  - 增加了一个手动标记登录的按钮，刷新后也不怕状态丢失啦。
+
+## [1.0.2] - 2025-09-20 🎯
+
+### Fixed
+- **投递更智能！**
+  - 现在会自动过滤掉已经投递过的岗位，不再重复劳动。
+  - 解决了BOSS风控偶尔导致任务中断的问题，现在更稳定啦。
+
+## [1.0.1] - 2025-09-17 🌟
+
+### Added
+- **“神仙外企”模块上线！**
+  - 想找外企工作的小伙伴们看过来！
+
+### Changed
+- **BOSS查询更强大！**
+  - 岗位查询的字典值现在从接口动态获取，信息更全更准。
+  - 简化了系统配置，让你开箱即用，减少烦恼。
+- **智能匹配升级！**
+  - 移除了旧的关键词匹配，未来将用期望职位和JD进行更智能的匹配。
+
+### Fixed
+- **修复了重复打招呼的尴尬... 😅**

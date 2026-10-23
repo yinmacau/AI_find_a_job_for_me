@@ -1,0 +1,37 @@
+# ===== 构建产物 =====
+target/
+frontend/dist/
+__pycache__/
+*.pyc
+
+# ===== 依赖 =====
+node_modules/
+
+# ===== 密钥与本地配置（严禁提交）=====
+.env
+resume_matcher_config.json
+
+# ===== 运行期产物与个人数据 =====
+logs/
+node-services/recruitment-browser/.profiles/
+agent_strategy.json
+*.db
+*.db-shm
+*.db-wal
+
+# 岗位/投递数据（个人求职数据，不含仓库）
+ai_eval_jobs.json
+ai_filtered_jobs.json
+ai_filtered_nonoutsourced.json
+ai_matched_jobs.json
+contact_results*.json
+discovery_rotation_state.json
+greeting_messages.json
+resume_greeting_messages.json
+resume_low_score_jobs.json
+resume_matched_jobs.json
+
+# ===== AI 工具运行状态（会话事件流等，不属于项目代码）=====
+.claude/
+.converge/tmp/
+.converge/**/evidence/

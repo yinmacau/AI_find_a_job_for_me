@@ -1,0 +1,12 @@
+{
+  "config": {},
+  "extensions": [],
+  "fsm": {
+    "mode": "standard",
+    "severities": {
+      "1": [
+        "P0"
+      ]
+    }
+  }
+}

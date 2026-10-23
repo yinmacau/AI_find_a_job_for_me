@@ -1,0 +1,2 @@
+{"event": "reserved", "reservation_id": "fe0f51d9bc96", "ts": "2026-09-10T05:33:36.128376+00:00", "target_round": 1, "target_role": "outer-reviewer", "consumes": "outer", "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0}, "ceilings": {"outer": 8, "blind": 3, "ultraverge": 3, "total": 63}, "extension_id": null, "tier": "auditable-only"}
+{"event": "spawn_succeeded", "reservation_id": "fe0f51d9bc96", "ts": "2026-09-10T06:08:04.923754+00:00", "instance_id": "agent-2"}

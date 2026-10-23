@@ -1,0 +1,48 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "GetJobsApplication",
+      "request": "launch",
+      "mainClass": "getjobs.GetJobsApplication",
+      "projectName": "npe_get_jobs"
+    },
+    {
+      "name": "批量投递 BOSS 岗位",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_contact_sender.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--jobs-file",
+        "resume_matched_jobs.json",
+        "--greetings-file",
+        "resume_greeting_messages.json"
+      ],
+      "justMyCode": true
+    },
+    {
+      "name": "简历与岗位 AI 匹配",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/resume_matcher.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": true
+    },
+    {
+      "name": "BOSS 岗位发现",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/job_discovery.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--match-resume"
+      ],
+      "justMyCode": true
+    }
+  ]
+}

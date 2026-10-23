@@ -1,0 +1,12 @@
+{
+  "api_base_url": "https://api.deepseek.com",
+  "api_key": "sk-在此填入你的DeepSeek密钥",
+  "model": "deepseek-chat",
+  "temperature": 0.5,
+  "max_tokens": 2000,
+  "score_threshold": 60,
+  "resume_path": "在此填入你的简历docx绝对路径",
+  "jobs_file": "ai_filtered_nonoutsourced.json",
+  "output_file": "resume_matched_jobs.json",
+  "greetings_output_file": "resume_greeting_messages.json"
+}

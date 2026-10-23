@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.superxiang</groupId>
+    <artifactId>npe_get_jobs</artifactId>
+    <version>v1.1.0</version>
+    <name>npe-get-jobs</name>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.12</version>
+    </parent>
+
+    <properties>
+        <spring-ai.version>1.0.0-M6</spring-ai.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+    </properties>
+
+
+    <dependencies>
+        <!-- ========================= -->
+        <!-- Spring Boot 基础与 Web 层 -->
+        <!-- ========================= -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!-- Web 支持（MVC、Jackson、Tomcat 等） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.projectreactor.netty</groupId>
+            <artifactId>reactor-netty-http</artifactId>
+        </dependency>
+
+        <!-- 数据访问：JPA -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- ===================== -->
+        <!-- 数据库与内存数据库 -->
+        <!-- ===================== -->
+        <!-- SQLite 数据库支持 -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.45.0.0</version>
+        </dependency>
+        <!-- SQLite Hibernate 方言支持 -->
+        <dependency>
+            <groupId>org.hibernate.orm</groupId>
+            <artifactId>hibernate-community-dialects</artifactId>
+        </dependency>
+
+        <!-- ========================= -->
+        <!-- JSON/YAML 处理与序列化 -->
+        <!-- ========================= -->
+        <!-- Jackson 核心与绑定（对象与 JSON 互转） -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+        </dependency>
+        <!-- Jackson YAML 数据格式支持 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
+        </dependency>
+        <!-- 读取 YAML 配置（底层解析器） -->
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+        </dependency>
+        <!-- 替代 org.json（Apache-2.0） -->
+        <dependency>
+            <groupId>com.github.openjson</groupId>
+            <artifactId>openjson</artifactId>
+            <version>1.0.12</version>
+        </dependency>
+
+        <!-- ================= -->
+        <!-- HTTP/网络客户端 -->
+        <!-- ================= -->
+        <!-- Apache HttpClient Fluent API（简化 HTTP 调用） -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5-fluent</artifactId>
+            <version>5.1</version>
+        </dependency>
+        <!-- OkHttp（高性能 HTTP 客户端） -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>4.12.0</version>
+        </dependency>
+
+        <!-- ================= -->
+        <!-- 文档/Excel 解析   -->
+        <!-- ================= -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.5</version>
+        </dependency>
+
+        <!-- ===================== -->
+        <!-- AI/大模型 接入能力 -->
+        <!-- ===================== -->
+        <!-- Spring AI OpenAI Starter（通过 Spring 方式接入 LLM 服务） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
+            <version>${spring-ai.version}</version>
+        </dependency>
+
+        <!-- Spring Cloud Context（支持 @RefreshScope 动态刷新配置） -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-context</artifactId>
+            <version>4.1.0</version>
+        </dependency>
+        
+        <!-- Spring Boot Actuator（提供刷新端点） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        
+        <!-- ============ -->
+        <!-- 工具与辅助 -->
+        <!-- ============ -->
+        <dependency>
+            <groupId>com.samskivert</groupId>
+            <artifactId>jmustache</artifactId>
+            <version>1.16</version>
+        </dependency>
+        <!-- 注解处理：仅编译期生效，不参与打包 -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>1.18.30</version>
+            <scope>provided</scope>
+        </dependency>
+
+
+        <!-- ===================== -->
+        <!-- 自动化/浏览器驱动   -->
+        <!-- ===================== -->
+        <!-- 旧平台实现的编译兼容依赖；运行态已禁用，平台迁移到 Patchright sidecar 后删除。 -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <version>1.51.0</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- JWT 鉴权 -->
+        <dependency>
+            <groupId>com.auth0</groupId>
+            <artifactId>java-jwt</artifactId>
+            <version>4.4.0</version>
+        </dependency>
+        <!--<dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webflux</artifactId>
+        </dependency>-->
+    </dependencies>
+
+    <build>
+        <sourceDirectory>src/main/java</sourceDirectory>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>21</source>
+                    <target>21</target>
+                    <release>21</release>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>3.2.12</version>
+                <configuration>
+                    <mainClass>getjobs.GetJobsApplication</mainClass>
+                    <!-- 排除编译期依赖（如 lombok） -->
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
+                前端构建流程：使用 frontend-maven-plugin 在 Maven 生命周期中自动完成 Node 环境安装、依赖安装与生产构建。
+                该插件会在 generate-resources 阶段执行 npm 命令，确保后续资源复制阶段可以拿到最新的 dist 目录。
+            -->
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>1.13.4</version>
+                <configuration>
+                    <!-- 指定 Vue 前端工程所在目录 -->
+                    <workingDirectory>${project.basedir}/frontend</workingDirectory>
+                    <!-- Node/NPM 安装的本地缓存目录，避免污染全局环境 -->
+                    <installDirectory>${project.build.directory}/.frontend</installDirectory>
+                    <!-- 自动下载并使用的 Node.js 版本，需与前端 package.json 支持的版本保持一致 -->
+                    <nodeVersion>v20.14.0</nodeVersion>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>install-node-and-npm</id>
+                        <!-- 在资源生成阶段安装 Node 环境，确保后续 npm 命令可用 -->
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <!-- 下载并安装指定版本的 Node & npm -->
+                            <goal>install-node-and-npm</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>npm-install</id>
+                        <!-- generate-resources 阶段执行 npm install，安装依赖 -->
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <!-- 调用 npm 命令 -->
+                            <goal>npm</goal>
+                        </goals>
+                        <configuration>
+                            <!-- npm 安装命令 -->
+                            <arguments>install</arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-build</id>
+                        <!-- generate-resources 阶段执行生产构建，生成 dist -->
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <configuration>
+                            <!-- 执行 npm run build，产出位于 frontend/dist -->
+                            <arguments>run build</arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
+                将前端构建产物复制到后端资源目录。复制目标为 target/classes/dist，
+                从而在 Spring Boot 打包时自然包含最新的前端静态文件。
+            -->
+            <plugin>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-frontend-dist</id>
+                        <!-- 在 process-resources 阶段复制前端静态资源 -->
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <!-- 复制目标路径：target/classes/dist -->
+                            <outputDirectory>${project.build.outputDirectory}/dist</outputDirectory>
+                            <!-- 覆盖已有文件，保证每次构建都是最新结果 -->
+                            <overwrite>true</overwrite>
+                            <resources>
+                                <resource>
+                                    <!-- 前端构建产物目录 -->
+                                    <directory>${project.basedir}/frontend/dist</directory>
+                                    <!-- 不对静态资源做过滤，否则会破坏打包文件 -->
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
