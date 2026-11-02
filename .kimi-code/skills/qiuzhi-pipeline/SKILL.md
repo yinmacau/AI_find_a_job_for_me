@@ -7,9 +7,9 @@ arguments:
   - stage
 ---
 
-# npe_get_jobs 求职自动化流程
+#求职自动化流程
 
-项目根目录：`C:\Users\YHR\npe_get_jobs`（以下所有命令都在该目录、conda base 环境的 `python` 下执行，**不要用 WindowsApps 的 python3.12.exe**）。
+项目根目录：``（以下所有命令都在该目录、conda base 环境的 `python` 下执行，**不要用 WindowsApps 的 python3.12.exe**）。
 
 可选参数 `$stage`：`discover`（只发现+匹配）/ `send`（只投递）/ `login`（只刷登录）/ 空或 `all`（全流程）。用户提到具体阶段时按阶段执行，否则跑全流程。
 
@@ -56,7 +56,7 @@ arguments:
 
 ## 关键配置位置（改逻辑前先和用户确认）
 
-- `job_discovery.py` 顶部：`DEFAULT_DIRECTIONS`（17 个关键词）、`GOAL_SUFFIX`（关键词模式，「深圳 10K以上 全职 非外包」）、`RESUME_GOAL_SUFFIX`（简历驱动，「深圳 10K以上」）、`INTERVAL_MIN/MAX_SECONDS`、`MAX_SCROLL_PAGES`、`ROTATION_BATCH_SIZE`。
+- `job_discovery.py` 顶部：`DEFAULT_DIRECTIONS`（17 个关键词）、`GOAL_SUFFIX`（关键词模式，「深圳 10K以上 全职 非外包」）、`RESUME_GOAL_SUFFIX`（简历驱动，「广东 10K以上」）、`INTERVAL_MIN/MAX_SECONDS`、`MAX_SCROLL_PAGES`、`ROTATION_BATCH_SIZE`。
 - `resume_matcher_config.json`：DeepSeek key/model、`score_threshold`（默认 60）、简历路径。
 - `resume_matcher.py` 顶部：`MATCH_BATCH_SIZE`（默认 3）、`DEFAULT_ASSUMED_SKILLS`。
 - `run_contact_sender.py` 顶部：`EXPERIENCE_REQUIRED_PATTERN`、`DELAY_SECONDS`、`FAIL_ABORT_THRESHOLD`。
